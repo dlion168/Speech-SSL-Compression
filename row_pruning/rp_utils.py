@@ -4,9 +4,6 @@ import torch.nn as nn
 import math
 from fairseq_code import MultiheadAttention
 from tqdm import tqdm
-from collections import defaultdict
-from dataset import MelFeatDataset
-from torch.utils.data import DataLoader
 
 def set_prune_interval(prune_interval, warm_up_steps, total_prune_steps):
     if isinstance(prune_interval, int):

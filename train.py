@@ -24,6 +24,7 @@ def get_args():
     parser.add_argument('-m', '--mode', choices=['weight-pruning', 'head-pruning', 'row-pruning', 'distillation']
                                                 , help='Different mode of training')
     parser.add_argument('-f', '--frame_period', default=20, choices=[10,20], type=int)
+    parser.add_argument('-u', '--upstream', default='melhubert', choices=['hubert', 'wav2vec2', 'melhubert'], type=str)
     # Options
     parser.add_argument('-i', '--initial_weight', help='Initialize model with a specific weight. This will be the teacher\'s weight in distillation mode.')
     parser.add_argument('--init_optimizer_from_initial_weight', action='store_true', help='Initialize optimizer from -i argument as well when set to true')

@@ -1,6 +1,5 @@
 import os 
 import torch
-import math
 from fairseq_code import MultiheadAttention
 from tqdm import tqdm
 from collections import defaultdict

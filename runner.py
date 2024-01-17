@@ -15,6 +15,7 @@ from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 from dataset import MelFeatDataset
 from pytorch_code import prune
+import importlib
 
 class Runner():
     def __init__(self, args, runner_config):
@@ -31,8 +32,8 @@ class Runner():
         # Mode of pre-training
         if args.mode == 'melhubert':
             print('[Runner] Mode: Pre-training MelHuBERT')
-            from melhubert.pretrain_expert import MelHuBERTPretrainer 
-            from melhubert.mh_utils import MelHuBERTTools
+            from upstream.melhubert.pretrain_expert import MelHuBERTPretrainer 
+            from upstream.melhubert.mh_utils import MelHuBERTTools
             self.melhubert = MelHuBERTPretrainer(
                 self.upstream_config,
                 self.args.initial_weight,
@@ -47,7 +48,7 @@ class Runner():
             self.save_every_x_epochs = self.mh_tools.save_every_x_epochs
         elif args.mode == 'weight-pruning':
             print(f'[Runner] Mode: weight-pruning on MelHuBERT')
-            from melhubert.pretrain_expert import MelHuBERTPretrainer
+            from upstream.melhubert.pretrain_expert import MelHuBERTPretrainer
             from weight_pruning.wp_utils import WeightPruningTools
             self.melhubert = MelHuBERTPretrainer(
                 self.upstream_config,
@@ -68,7 +69,7 @@ class Runner():
             assert len(self.prune_steps) == self.total_prune_step, 'The length of pruning interval should equal to the total pruning steps' 
         elif args.mode == 'head-pruning':
             print(f'[Runner] Mode: {self.runner_config["prune"]["metric"]} head-pruning on MelHuBERT')
-            from melhubert.pretrain_expert import MelHuBERTPretrainer
+            from upstream.melhubert.pretrain_expert import MelHuBERTPretrainer
             from head_pruning.hp_utils import HeadPruningTools, set_prune_interval
             self.melhubert = MelHuBERTPretrainer(
                 self.upstream_config,
@@ -90,7 +91,7 @@ class Runner():
             assert len(self.prune_steps) == self.total_prune_step, 'The length of pruning interval should equal to the total pruning steps' 
         elif args.mode == 'row-pruning':
             print(f'[Runner] Mode: row-pruning on MelHuBERT')
-            from melhubert.pretrain_expert import MelHuBERTPretrainer
+            from upstream.melhubert.pretrain_expert import MelHuBERTPretrainer
             from row_pruning.rp_utils import RowPruningTools, set_prune_interval
             self.melhubert = MelHuBERTPretrainer(
                 self.upstream_config,
@@ -113,7 +114,7 @@ class Runner():
         elif args.mode == 'distillation':
             print(f'[Runner] Mode: distillation on MelHuBERT')
             from distillation.pretrain_expert import MelHuBERTDistiller
-            from melhubert.mh_utils import MelHuBERTTools
+            from upstream.melhubert.mh_utils import MelHuBERTTools
             self.melhubert = MelHuBERTDistiller(
                 self.upstream_config,
                 self.args.initial_weight,
@@ -128,6 +129,26 @@ class Runner():
             self.save_every_x_epochs = self.mh_tools.save_every_x_epochs
         else:
             print('We do not support this mode currently.')
+
+    def _get_upstream(self):
+        init_upstream = self.init_ckpt.get('Upstream_Config')
+        if init_upstream:
+            self.args.upstream_config = init_upstream
+        module_path = f'upstream.{self.args.upstream}.pretrain_expert'
+        Upstream = getattr(importlib.import_module(module_path), 'UpstreamPretrainExpert')
+        upstream = Upstream(self.config['pretrain_expert']['datarc'], 
+                            self.args.upstream_config,
+                            self.args.device,
+                            self.args.multi_gpu).to(self.args.device)
+
+        assert hasattr(upstream, 'forward')
+        assert hasattr(upstream, 'load_model')
+        assert hasattr(upstream, 'add_state_to_save')
+
+        if self.init_ckpt != {}:
+            print('[Runner] - Loading upstream weights from the previous experiment')
+            upstream.load_model(self.init_ckpt)
+        return upstream
 
     def _get_optimizer(self, model):
         from torch.optim import Adam
