@@ -23,43 +23,33 @@ class Runner():
         self.runner_config = runner_config
         self.logger = SummaryWriter(args.expdir)                                                     
         self.upstream_config = yaml.load(open(self.args.upstream_config, 'r'), Loader=yaml.FullLoader)
+        self.upstream_pretrainer = self._get_upstream()
 
         # Assert the dimension of input projection layer
         if self.args.frame_period == 20:
             assert self.upstream_config['melhubert']['feat_emb_dim'] == 80, f'Feature embedding dimension should be {80} when the frame period is {20}'
         elif self.args.frame_period == 10:
             assert self.upstream_config['melhubert']['feat_emb_dim'] == 40, f'Feature embedding dimension should be {40} when the frame period is {10}'
+        
         # Mode of pre-training
         if args.mode == 'melhubert':
             print('[Runner] Mode: Pre-training MelHuBERT')
-            from upstream.melhubert.pretrain_expert import MelHuBERTPretrainer 
             from upstream.melhubert.mh_utils import MelHuBERTTools
-            self.melhubert = MelHuBERTPretrainer(
-                self.upstream_config,
-                self.args.initial_weight,
-                self.args.device,
-                self.args.multi_gpu,).to(self.args.device)
             self.mh_tools = MelHuBERTTools(
                 self.args,
                 self.runner_config,
                 self.upstream_config,
-                self.melhubert
+                self.upstream_pretrainer
             )
             self.save_every_x_epochs = self.mh_tools.save_every_x_epochs
         elif args.mode == 'weight-pruning':
             print(f'[Runner] Mode: weight-pruning on MelHuBERT')
-            from upstream.melhubert.pretrain_expert import MelHuBERTPretrainer
             from weight_pruning.wp_utils import WeightPruningTools
-            self.melhubert = MelHuBERTPretrainer(
-                self.upstream_config,
-                self.args.initial_weight,
-                self.args.device,
-                self.args.multi_gpu,).to(self.args.device)
             self.wp_tools = WeightPruningTools(
                 self.args,
                 self.runner_config,
                 self.upstream_config,
-                self.melhubert,
+                self.upstream_pretrainer,
                 self.args.initial_weight
             )
 
@@ -69,18 +59,12 @@ class Runner():
             assert len(self.prune_steps) == self.total_prune_step, 'The length of pruning interval should equal to the total pruning steps' 
         elif args.mode == 'head-pruning':
             print(f'[Runner] Mode: {self.runner_config["prune"]["metric"]} head-pruning on MelHuBERT')
-            from upstream.melhubert.pretrain_expert import MelHuBERTPretrainer
             from head_pruning.hp_utils import HeadPruningTools, set_prune_interval
-            self.melhubert = MelHuBERTPretrainer(
-                self.upstream_config,
-                self.args.initial_weight,
-                self.args.device,
-                self.args.multi_gpu,).to(self.args.device)
             self.hp_tools = HeadPruningTools(
                 self.args,
                 self.runner_config,
                 self.upstream_config,
-                self.melhubert
+                self.upstream_pretrainer
             )
             self.total_prune_step = self.runner_config['prune']['total_steps']
             self.prune_steps = set_prune_interval(
@@ -91,18 +75,12 @@ class Runner():
             assert len(self.prune_steps) == self.total_prune_step, 'The length of pruning interval should equal to the total pruning steps' 
         elif args.mode == 'row-pruning':
             print(f'[Runner] Mode: row-pruning on MelHuBERT')
-            from upstream.melhubert.pretrain_expert import MelHuBERTPretrainer
             from row_pruning.rp_utils import RowPruningTools, set_prune_interval
-            self.melhubert = MelHuBERTPretrainer(
-                self.upstream_config,
-                self.args.initial_weight,
-                self.args.device,
-                self.args.multi_gpu,).to(self.args.device)
             self.row_tools = RowPruningTools(
                 self.args,
                 self.runner_config,
                 self.upstream_config,
-                self.melhubert
+                self.upstream_pretrainer
             )
             self.total_prune_step = self.runner_config['prune']['total_steps']
             self.prune_steps = set_prune_interval(
@@ -115,7 +93,7 @@ class Runner():
             print(f'[Runner] Mode: distillation on MelHuBERT')
             from distillation.pretrain_expert import MelHuBERTDistiller
             from upstream.melhubert.mh_utils import MelHuBERTTools
-            self.melhubert = MelHuBERTDistiller(
+            self.upstream_pretrainer = MelHuBERTDistiller(
                 self.upstream_config,
                 self.args.initial_weight,
                 self.args.device,
@@ -124,7 +102,7 @@ class Runner():
                 self.args,
                 self.runner_config,
                 self.upstream_config,
-                self.melhubert
+                self.upstream_pretrainer
             )
             self.save_every_x_epochs = self.mh_tools.save_every_x_epochs
         else:
@@ -134,7 +112,7 @@ class Runner():
         init_upstream = self.init_ckpt.get('Upstream_Config')
         if init_upstream:
             self.args.upstream_config = init_upstream
-        module_path = f'upstream.{self.args.upstream}.pretrain_expert'
+        module_path = f'upstream.{self.args.upstream}'
         Upstream = getattr(importlib.import_module(module_path), 'UpstreamPretrainExpert')
         upstream = Upstream(self.config['pretrain_expert']['datarc'], 
                             self.args.upstream_config,
@@ -186,7 +164,7 @@ class Runner():
 
     def train(self):
         # Set model train mode
-        self.melhubert.train()
+        self.upstream_pretrainer.train()
         # Prepare data
         gradient_accumulate_steps = self.runner_config['runner']['gradient_accumulate_steps']
         print('[Runner] - Accumulated batch size:', 
@@ -212,7 +190,7 @@ class Runner():
      
         assert self.runner_config['runner']['total_steps'] > self.runner_config['runner']['log_step']
         # Set optimizer
-        optimizer = self._get_optimizer(self.melhubert)
+        optimizer = self._get_optimizer(self.upstream_pretrainer)
         # set progress bar
         pbar = tqdm(total=self.runner_config['runner']['total_steps'], dynamic_ncols=True, desc='overall')
 
@@ -244,7 +222,7 @@ class Runner():
                         # Head pruning
                         self.hp_tools.prune_api()       
                         # Redefine optimizer 
-                        optimizer = self._get_optimizer(self.melhubert)
+                        optimizer = self._get_optimizer(self.upstream_pretrainer)
                 elif self.args.mode  == 'row-pruning':
                     if (global_step in self.prune_steps) and first_accu:
                         # Save model before pruning
@@ -252,14 +230,14 @@ class Runner():
                         # Row pruning
                         self.row_tools.prune_api()       
                         # Redefine optimizer 
-                        optimizer = self._get_optimizer(self.melhubert)
+                        optimizer = self._get_optimizer(self.upstream_pretrainer)
                 # try/except block for forward/backward
                 try:
                     if pbar.n >= pbar.total:
                         break
                     global_step = pbar.n + 1
 
-                    loss = self.melhubert(
+                    loss = self.upstream_pretrainer(
                         data,
                         global_step=global_step,
                         log_step=self.runner_config['runner']['log_step'],
@@ -298,7 +276,7 @@ class Runner():
                     batch_loss = 0        
               
                 # Gradient clipping
-                grad_norm = torch.nn.utils.clip_grad_norm_(self.melhubert.model.parameters(), self.runner_config['runner']['gradient_clipping'])
+                grad_norm = torch.nn.utils.clip_grad_norm_(self.upstream_pretrainer.model.parameters(), self.runner_config['runner']['gradient_clipping'])
                 if math.isnan(grad_norm):
                     tqdm.write(f'[Runner] - Error : grad norm is NaN at global step {global_step}')
                 elif not math.isnan(grad_norm):
