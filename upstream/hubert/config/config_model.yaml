@@ -1,6 +1,6 @@
 model:
   _name: hubert
-  label_rate: ???
+  label_rate: 50
   skip_masked: false
   skip_nomask: false
   mask_prob: 0.80

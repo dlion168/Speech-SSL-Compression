@@ -1,0 +1,29 @@
+
+student:
+  _name: wav2vec2
+  quantize_targets: true
+  final_dim: 256
+  encoder_layerdrop: 0.05
+  dropout_input: 0.1
+  dropout_features: 0.1
+  feature_grad_mult: 0.1
+  encoder_embed_dim: 768
+  encoder_layers: 6
+
+teacher:
+  _name: wav2vec2
+  quantize_targets: true
+  final_dim: 256
+  encoder_layerdrop: 0.05
+  dropout_input: 0.1
+  dropout_features: 0.1
+  feature_grad_mult: 0.1
+  encoder_embed_dim: 768
+
+task:
+  sequence_length: 750
+
+loss_param:
+  T: 1         # temparature when doing KL
+  alpha: 1     # ratio of hard label loss and KL. 1 means no hard label loss.
+  type: nomasked # masked or nomasked

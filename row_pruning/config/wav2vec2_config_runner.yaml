@@ -10,7 +10,7 @@ checkpoint:
 
 task:
   _name: audio_pretraining
-  data: ???
+  data: /mnt/data/ycevan/datasets/Librispeech_manifest
   max_sample_size: 250000
   min_sample_size: 32000
   normalize: false
@@ -51,3 +51,10 @@ optimizer:
 
 lr_scheduler:
   warmup_updates: 32000
+
+prune:
+  total_steps: 20 # total pruning steps
+  num_rows_each_step: 128
+  interval: [0, 25000, 50000, 75000, 100000, 125000, 150000, 175000, 200000, 
+              225000, 250000, 275000, 300000, 325000, 350000, 375000, 400000, 425000, 450000, 475000]
+  warm_up: 1000

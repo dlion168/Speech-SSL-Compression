@@ -8,25 +8,25 @@ import yaml
 
 import torch
 import torch.nn as nn
-from model import HuBERTModel, HuBERTConfig
+from model import Wav2Vec2Model, Wav2Vec2Config
 from weight_pruning.wp_utils import get_params_to_prune
-from criterion import HubertCriterion
+from criterion import Wav2vecCriterion
 from pytorch_code import prune
 
-class HuBERTPretrainer(nn.Module):
+class Wav2vec2Pretrainer(nn.Module):
     def __init__(self, upstream_config, initial_weight=None, device='cuda', multi_gpu=False, **kwargs):
-        super(HuBERTPretrainer, self).__init__()
+        super(Wav2vec2Pretrainer, self).__init__()
 
         self.initial_weight = initial_weight
         self.device = device
         self.multi_gpu = multi_gpu
 
         self.upstream_config = upstream_config
-        self.dicts = kwargs['dicts']
         # Initialize the model 
         self._init_model()
-
-        self.criterion = HubertCriterion()
+        # Define pre-training loss
+        self.criterion = Wav2vecCriterion()
+     
         # Make multiple GPU training possible
         if self.multi_gpu:
             self.model = torch.nn.DataParallel(self.model)
@@ -36,8 +36,8 @@ class HuBERTPretrainer(nn.Module):
 
     def _init_model(self):
         print('[Pretrainer] - Initializing model...')
-        self.model_config = HuBERTConfig(self.upstream_config['model'])
-        self.model = HuBERTModel(self.model_config, self.dicts)
+        self.model_config = Wav2Vec2Config(self.upstream_config['model'])
+        self.model = Wav2Vec2Model(self.model_config, )
 
         # Do initialization from a checkpoint if needed
         if self.initial_weight:
@@ -107,19 +107,9 @@ class HuBERTPretrainer(nn.Module):
         Return:
             loss        
         """
-        # self.model(
-        #     source: torch.Tensor,
-        #     target_list: Optional[List[torch.Tensor]] = None,
-        #     padding_mask: Optional[torch.Tensor] = None,
-        #     mask: bool = True,
-        #     features_only: bool = False,
-        #     output_layer: Optional[int] = None,
-        # ) -> Dict[str, torch.Tensor]:
         loss = 0.0 
         for key in data['net_input'].keys():
             data['net_input'][key] = data['net_input'][key].to(self.device)
-        for i in range(len(data['target_list'])):
-            data['target_list'][i] = data['target_list'][i].to(self.device)
-        loss, sample_size = self.criterion.forward(self.model, data)
+        loss, sample_size= self.criterion.forward(self.model, data)
         
         return loss

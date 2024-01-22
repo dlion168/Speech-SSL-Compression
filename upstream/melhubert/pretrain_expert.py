@@ -11,7 +11,7 @@ from weight_pruning.wp_utils import get_params_to_prune
 from pytorch_code import prune
 
 class MelHuBERTPretrainer(nn.Module):
-    def __init__(self, upstream_config, initial_weight=None, device='cuda', multi_gpu=False):
+    def __init__(self, upstream_config, initial_weight=None, device='cuda', multi_gpu=False, **kwargs):
         super(MelHuBERTPretrainer, self).__init__()
 
         self.initial_weight = initial_weight
@@ -33,6 +33,7 @@ class MelHuBERTPretrainer(nn.Module):
 
     def _init_model(self):
         print('[Pretrainer] - Initializing model...')
+        print(self.upstream_config)
         self.model_config = MelHuBERTConfig(self.upstream_config['melhubert'])
         self.model = MelHuBERTModel(self.model_config)
 

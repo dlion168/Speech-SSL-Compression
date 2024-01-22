@@ -6,58 +6,13 @@
 """
 import numpy as np
 import torch
-from typing import Dict, List, Optional, Tuple, Dictionary
+from typing import Dict, List, Optional, Tuple
+from fairseq.data import Dictionary
 from torch import nn
-from module import TransformerEncoder, GradMultiply, ConvFeatureExtractionModel
+from module import TransformerEncoder, Wav2vec2TransformerEncoder, GradMultiply, ConvFeatureExtractionModel
 from fairseq_code import compute_mask_indices, buffered_arange, index_put, is_xla_tensor
-
-class MelHuBERTConfig:
-    """
-    Configuration class
-    """
-
-    def __init__(self, config: dict):
-        # Input feature dimemsion 
-        self.feat_emb_dim = int(config.get("feat_emb_dim", 40))
-       
-        # Positional embedding type
-        self.pos_emb_type = str(config.get("pos_emb_type", "conv"))
-        self.pos_conv_depth = int(config.get("pos_conv_depth", 1))
-        self.conv_pos = int(config.get("conv_pos", 128))
-        self.conv_pos_groups = int(config.get("conv_pos_groups", 16))
-
-        # Transformer encoder
-        self.encoder_layers = int(config.get("encoder_layers", 1))
-        self.encoder_embed_dim = int(config.get("encoder_embed_dim", 768))
-        self.encoder_ffn_embed_dim = int(config.get("encoder_ffn_embed_dim", 3072))
-        self.encoder_attention_heads = int(config.get("encoder_attention_heads", 12))
-        self.activation_fn = str(config.get("activation_fn", "gelu"))
-        self.layer_norm_first = bool(config.get("layer_norm_first", False))
-        self.attention_type = str(config.get("attention_type", "original"))
-        # Output dimension 
-        self.num_cluster = int(config.get("num_cluster", 512))
-        self.final_dim = int(config.get("final_dim", 40))
-        # Criterion (This two parameters would not be used in distillation mode)
-        self.pred_masked_weight = float(config.get("pred_masked_weight", 1.0))
-        self.pred_nomask_weight = float(config.get("pred_nomask_weight", 0.0))
-        # Masking 
-        self.mask_prob = float(config.get("mask_prob", 0.8))
-        self.mask_length = int(config.get("mask_length", 10))
-        self.mask_selection = str(config.get("mask_selection", 'static'))
-        self.mask_other = float(config.get("mask_other", 0.0))
-        self.no_mask_overlap = bool(config.get("no_mask_overlap", False))
-        self.mask_min_space = int(config.get("mask_min_space", 1))
-
-        self.skip_masked = bool(config.get("skip_masked", False))
-        self.skip_nomask = bool(config.get("skip_nomask", True))
-
-        self.learnable_mask_emb = bool(config.get("learnable_mask_emb", False))
-        self.mask_before_proj = bool(config.get("mask_before_proj", True))
-        # Dropout
-        self.dropout = float(config.get("dropout", 0.1))
-        self.attention_dropout = float(config.get("attention_dropout", 0.1))
-        self.activation_dropout = float(config.get("activation_dropout", 0.1))
-        self.encoder_layerdrop = float(config.get("encoder_layerdrop", 0.0))
+from fairseq_code.gumbel_vector_quantizer import GumbelVectorQuantizer
+from model_config import Wav2Vec2Config, HuBERTConfig, MelHuBERTConfig
 
 class MelHuBERTModel(nn.Module):
 
@@ -207,71 +162,6 @@ class MelHuBERTModel(nn.Module):
         
         return hidden, logit_m, logit_u, label_m, label_u, layer_hiddens, pre_feat, mask_indices
 
-class HuBERTConfig:
-    """
-    Configuration class
-    """
-
-    def __init__(self, config: dict):
-        self.extractor_mode = str(config.get("extractor_mode", "default"))
-        
-        # Transformer encoder
-        self.encoder_layers = int(config.get("encoder_layers", 12))
-        self.encoder_embed_dim = int(config.get("encoder_embed_dim", 768))
-        self.encoder_ffn_embed_dim = int(config.get("encoder_ffn_embed_dim", 3072))
-        self.encoder_attention_heads = int(config.get("encoder_attention_heads", 12))
-        self.activation_fn = str(config.get("activation_fn", "gelu"))
-        self.layer_type = str(config.get("layer_type", "transformer"))
-        
-        # Dropouts
-        self.dropout = float(config.get("dropout", 0.1))
-        self.attention_dropout = float(config.get("attention_dropout", 0.1))
-        self.activation_dropout = float(config.get("activation_dropout", 0.0))
-        self.encoder_layerdrop = float(config.get("encoder_layerdrop", 0.0))
-        self.dropout_input = float(config.get("dropout_input", 0.0))
-        self.dropout_features = float(config.get("dropout_features", 0.0))
-
-        # Other parameters
-        self.final_dim = int(config.get("final_dim", 0))
-        self.untie_final_proj = bool(config.get("untie_final_proj", False))
-        self.layer_norm_first = bool(config.get("layer_norm_first", False))
-        self.conv_feature_layers = eval(config.get("conv_feature_layers", "[(512,10,5)] + [(512,3,2)] * 4 + [(512,2,2)] * 2"))
-        self.conv_bias = bool(config.get("conv_bias", False))
-        self.logit_temp = float(config.get("logit_temp", 0.1))
-        self.target_glu = bool(config.get("target_glu", False))
-        self.feature_grad_mult = float(config.get("feature_grad_mult", 1.0))
-        
-        # Masking
-        self.mask_length = int(config.get("mask_length", 10))
-        self.mask_prob = float(config.get("mask_prob", 0.65))
-        self.mask_selection = str(config.get("mask_selection", 'static'))
-        self.mask_other = float(config.get("mask_other", 0))
-        self.no_mask_overlap = bool(config.get("no_mask_overlap", False))
-        self.mask_min_space = int(config.get("mask_min_space", 1))
-
-        # Channel Masking
-        self.mask_channel_length = int(config.get("mask_channel_length", 10))
-        self.mask_channel_prob = float(config.get("mask_channel_prob", 0.0))
-        self.mask_channel_selection = str(config.get("mask_channel_selection", "static"))
-        self.mask_channel_other = float(config.get("mask_channel_other", 0))
-        self.no_mask_channel_overlap = bool(config.get("no_mask_channel_overlap", False))
-        self.mask_channel_min_space = int(config.get("mask_channel_min_space", 1))
-
-        # Positional Embeddings
-        self.conv_pos = int(config.get("conv_pos", 128))
-        self.conv_pos_groups = int(config.get("conv_pos_groups", 16))
-        self.conv_pos_batch_norm = bool(config.get("conv_pos_batch_norm", False))
-
-        self.latent_temp = tuple(map(float, config.get("latent_temp", (2, 0.5, 0.999995))))
-
-        # Loss Computation
-        self.skip_masked = bool(config.get("skip_masked", False))
-        self.skip_nomask = bool(config.get("skip_nomask", False))
-
-        self.checkpoint_activations = bool(config.get("checkpoint_activations", False))
-
-        # FP16 Optimization
-        self.required_seq_len_multiple = int(config.get("required_seq_len_multiple", 2))
 
 class HuBERTModel(nn.Module):
     def __init__(self,
@@ -279,7 +169,7 @@ class HuBERTModel(nn.Module):
                  dictionaries: List[Dictionary],):
         super().__init__()
         
-        feature_enc_layers = eval(cfg.conv_feature_layers)  # noqa
+        feature_enc_layers = cfg.conv_feature_layers  # noqa
         self.embed = feature_enc_layers[-1][0]
         self.feature_extractor = ConvFeatureExtractionModel(
             conv_layers=feature_enc_layers,
@@ -324,7 +214,7 @@ class HuBERTModel(nn.Module):
             torch.FloatTensor(cfg.encoder_embed_dim).uniform_()
         )
 
-        self.encoder = TransformerEncoder(cfg)
+        self.encoder = Wav2vec2TransformerEncoder(cfg)
         self.layer_norm = nn.LayerNorm(self.embed)
 
         self.target_glu = None
@@ -351,7 +241,7 @@ class HuBERTModel(nn.Module):
             )
             nn.init.uniform_(self.label_embs_concat)
 
-    def apply_mask(self, x, padding_mask):
+    def apply_mask(self, x, padding_mask, target_list):
         B, T, C = x.shape
         if self.mask_prob > 0:
             mask_indices = compute_mask_indices(
@@ -573,89 +463,13 @@ class HuBERTModel(nn.Module):
 
     
     
-class Wav2Vec2Config:
-    def __init__(self, config):
-        # Feature Extractor
-        self.extractor_mode = str(config.get("extractor_mode", "default"))
-
-        # Encoder
-        self.encoder_layers = int(config.get("encoder_layers", 12))
-        self.encoder_embed_dim = int(config.get("encoder_embed_dim", 768))
-        self.encoder_ffn_embed_dim = int(config.get("encoder_ffn_embed_dim", 3072))
-        self.encoder_attention_heads = int(config.get("encoder_attention_heads", 12))
-        self.activation_fn = str(config.get("activation_fn", "gelu"))
-        self.layer_type = str(config.get("layer_type", "transformer"))
-
-        # Dropouts
-        self.dropout = float(config.get("dropout", 0.1))
-        self.attention_dropout = float(config.get("attention_dropout", 0.1))
-        self.activation_dropout = float(config.get("activation_dropout", 0.0))
-        self.encoder_layerdrop = float(config.get("encoder_layerdrop", 0.0))
-        self.dropout_input = float(config.get("dropout_input", 0.0))
-        self.dropout_features = float(config.get("dropout_features", 0.0))
-
-        # Other Parameters
-        self.final_dim = int(config.get("final_dim", 0))
-        self.layer_norm_first = bool(config.get("layer_norm_first", False))
-        self.conv_feature_layers = eval(config.get("conv_feature_layers", "[(512, 10, 5)] + [(512, 3, 2)] * 4 + [(512,2,2)] + [(512,2,2)]"))
-        self.conv_bias = bool(config.get("conv_bias", False))
-        self.logit_temp = float(config.get("logit_temp", 0.1))
-        self.same_quantizer = bool(config.get("same_quantizer", False))
-        self.target_glu = bool(config.get("target_glu", False))
-        self.feature_grad_mult = float(config.get("feature_grad_mult", 1.0))
-        self.quantizer_depth = int(config.get("quantizer_depth", 1))
-        self.quantizer_factor = int(config.get("quantizer_factor", 3))
-        self.latent_vars = int(config.get("latent_vars", 320))
-        self.latent_groups = int(config.get("latent_groups", 2))
-        self.latent_dim = int(config.get("latent_dim", 0))
-
-        # Masking
-        self.mask_length = int(config.get("mask_length", 10))
-        self.mask_prob = float(config.get("mask_prob", 0.65))
-        self.mask_selection = str(config.get("mask_selection", "static"))
-        self.mask_other = float(config.get("mask_other", 0))
-        self.no_mask_overlap = bool(config.get("no_mask_overlap", False))
-        self.mask_min_space = int(config.get("mask_min_space", 1))
-        self.require_same_masks = bool(config.get("require_same_masks", True))
-        self.mask_dropout = float(config.get("mask_dropout", 0.0))
-
-        # Channel Masking
-        self.mask_channel_length = int(config.get("mask_channel_length", 10))
-        self.mask_channel_prob = float(config.get("mask_channel_prob", 0.0))
-        self.mask_channel_before = False
-        self.mask_channel_selection = str(config.get("mask_channel_selection", "static"))
-        self.mask_channel_other = float(config.get("mask_channel_other", 0))
-        self.no_mask_channel_overlap = bool(config.get("no_mask_channel_overlap", False))
-        self.mask_channel_min_space = int(config.get("mask_channel_min_space", 1))
-
-        # Negative Selection
-        self.num_negatives = int(config.get("num_negatives", 100))
-        self.negatives_from_everywhere = bool(config.get("negatives_from_everywhere", False))
-        self.cross_sample_negatives = int(config.get("cross_sample_negatives", 0))
-        self.codebook_negatives = int(config.get("codebook_negatives", 0))
-
-        # Positional Embeddings
-        self.conv_pos = int(config.get("conv_pos", 128))
-        self.conv_pos_groups = int(config.get("conv_pos_groups", 16))
-        self.pos_conv_depth = int(config.get("pos_conv_depth", 1))
-
-        # Latent Temperature
-        self.latent_temp = tuple(map(float, config.get("latent_temp", (2, 0.5, 0.999995))))
-
-        # Other Parameters
-        self.max_positions = int(config.get("max_positions", 100000))
-        self.checkpoint_activations = bool(config.get("checkpoint_activations", False))
-
-        # FP16 Optimization
-        self.required_seq_len_multiple = int(config.get("required_seq_len_multiple", 2))
-        self.crop_seq_to_multiple = int(config.get("crop_seq_to_multiple", 1))
 
 class Wav2Vec2Model(nn.Module):
     def __init__(self, cfg: Wav2Vec2Config):
         super().__init__()
         self.cfg = cfg
 
-        feature_enc_layers = eval(cfg.conv_feature_layers)
+        feature_enc_layers = cfg.conv_feature_layers
         self.embed = feature_enc_layers[-1][0]
 
         self.feature_extractor = ConvFeatureExtractionModel(
@@ -667,7 +481,7 @@ class Wav2Vec2Model(nn.Module):
 
         self.post_extract_proj = (
             nn.Linear(self.embed, cfg.encoder_embed_dim)
-            if self.embed != cfg.encoder_embed_dim and not cfg.quantize_input
+            if self.embed != cfg.encoder_embed_dim
             else None
         )
 
@@ -705,14 +519,27 @@ class Wav2Vec2Model(nn.Module):
 
         final_dim = cfg.final_dim if cfg.final_dim > 0 else cfg.encoder_embed_dim
 
-        self.project_q = nn.Linear(self.embed, final_dim)
+        if cfg.quantize_targets:
+            vq_dim = cfg.latent_dim if cfg.latent_dim > 0 else final_dim
+            self.quantizer = GumbelVectorQuantizer(
+                dim=self.embed,
+                num_vars=cfg.latent_vars,
+                temp=cfg.latent_temp,
+                groups=cfg.latent_groups,
+                combine_groups=False,
+                vq_dim=vq_dim,
+                time_first=True,
+                weight_proj_depth=cfg.quantizer_depth,
+                weight_proj_factor=cfg.quantizer_factor,
+            )
+            self.project_q = nn.Linear(vq_dim, final_dim)
+        else:
+            self.project_q = nn.Linear(self.embed, final_dim)
 
         self.mask_emb = nn.Parameter(
             torch.FloatTensor(cfg.encoder_embed_dim).uniform_()
         )
-        encoder_cls = TransformerEncoder
-
-        self.encoder = encoder_cls(cfg)
+        self.encoder = Wav2vec2TransformerEncoder(cfg)
         self.layer_norm = nn.LayerNorm(self.embed)
 
         self.target_glu = None
@@ -723,10 +550,10 @@ class Wav2Vec2Model(nn.Module):
 
         self.final_proj = nn.Linear(cfg.encoder_embed_dim, final_dim)
 
-    def upgrade_state_dict_named(self, state_dict, name):
-        super().upgrade_state_dict_named(state_dict, name)
-        """Upgrade a (possibly old) state dict for new versions of fairseq."""
-        return state_dict
+    # def upgrade_state_dict_named(self, state_dict, name):
+    #     super().upgrade_state_dict_named(state_dict, name)
+    #     """Upgrade a (possibly old) state dict for new versions of fairseq."""
+    #     return state_dict
 
     @classmethod
     def build_model(cls, cfg: Wav2Vec2Config, task=None):
@@ -871,8 +698,8 @@ class Wav2Vec2Model(nn.Module):
 
         def _conv_out_length(input_length, kernel_size, stride):
             return torch.floor((input_length - kernel_size) / stride + 1)
-
-        conv_cfg_list = eval(self.cfg.conv_feature_layers)
+        
+        conv_cfg_list = self.cfg.conv_feature_layers
 
         for i in range(len(conv_cfg_list)):
             input_lengths = _conv_out_length(
@@ -891,7 +718,6 @@ class Wav2Vec2Model(nn.Module):
         mask_indices=None,
         mask_channel_indices=None,
         padding_count=None,
-        corpus_key=None,
     ):
 
         if self.feature_grad_mult > 0:
@@ -908,7 +734,7 @@ class Wav2Vec2Model(nn.Module):
         features = self.layer_norm(features)
         unmasked_features = features.clone()
 
-        if padding_mask is not None and padding_mask.any():
+        if padding_mask is not None: #and padding_mask.any():
             input_lengths = (1 - padding_mask.long()).sum(-1)
             # apply conv formula to get real output_lengths
             output_lengths = self._get_feat_extract_output_lengths(input_lengths)
@@ -975,9 +801,9 @@ class Wav2Vec2Model(nn.Module):
             x = features
             y = unmasked_features
             mask_indices = None
-
+            
         x, layer_results = self.encoder(
-            x, padding_mask=padding_mask, layer=layer, corpus_key=corpus_key
+            x, padding_mask=padding_mask, layer=layer
         )
 
         if features_only:
@@ -1081,15 +907,14 @@ class Wav2Vec2Model(nn.Module):
         return self.quantizer.forward_idx(x)
 
     def extract_features(
-        self, source, padding_mask, mask=False, layer=None, corpus_key=None
+        self, source, padding_mask, mask=False, layer=None
     ):
         res = self.forward(
             source,
             padding_mask,
             mask=mask,
             features_only=True,
-            layer=layer,
-            corpus_key=corpus_key,
+            layer=layer
         )
         return res
 

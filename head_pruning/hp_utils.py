@@ -3,7 +3,7 @@ import torch
 from fairseq_code import MultiheadAttention
 from tqdm import tqdm
 from collections import defaultdict
-from dataset import MelFeatDataset
+from datasets.melhubert_dataset import MelFeatDataset
 from torch.utils.data import DataLoader
 
 def set_prune_interval(prune_interval, warm_up_steps, total_prune_steps):
@@ -55,8 +55,8 @@ class HeadPruningTools():
 
         if self.runner_config["prune"]["metric"] == "l1":
             heads_and_score = self.get_heads_norm(self.upstream.model.encoder)
-        elif self.runner_config["prune"]["metric"] == "data-driven":
-            heads_and_score = self.get_head_scores_by_data_driven()
+        # elif self.runner_config["prune"]["metric"] == "data-driven":
+        #    heads_and_score = self.get_head_scores_by_data_driven()
         save_path = os.path.join(self.args.expdir, f'heads_and_score_{self.total_heads}.ckpt')
         torch.save(heads_and_score, save_path)
         heads_and_score = sorted(heads_and_score, key=lambda x:x[1])

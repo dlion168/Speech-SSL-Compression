@@ -4,3 +4,7 @@ tmp/
 libri-360*/
 *.ckpt
 *.npy
+*.png
+upstream/hubert/*.pt
+upstream/wav2vec2/*.pt
+upstream/melhubert/*.pt

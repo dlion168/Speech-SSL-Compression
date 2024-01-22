@@ -1,1 +1,1 @@
-from pretrain_expert import MelHuBERTPretrainer as UpstreamPretrainExpert
+from .pretrain_expert import MelHuBERTPretrainer as UpstreamPretrainExpert

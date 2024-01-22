@@ -1,0 +1,1 @@
+from .pretrain_expert import Wav2vec2Pretrainer as UpstreamPretrainExpert

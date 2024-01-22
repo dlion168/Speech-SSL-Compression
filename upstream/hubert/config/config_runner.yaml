@@ -1,7 +1,5 @@
 common:
-  fp16: true
   log_format: json
-  log_interval: 200
   seed: 1337
   tensorboard_logdir: tblog
 
@@ -10,20 +8,11 @@ checkpoint:
   keep_interval_updates: 1
   no_epoch_checkpoints: true
 
-
-distributed_training:
-  ddp_backend: no_c10d
-  distributed_backend: 'nccl'
-  distributed_world_size: 32
-  distributed_port: 29671
-  nprocs_per_node: 8
-  find_unused_parameters: true
-
 task:
   _name: hubert_pretraining
-  data: ???
-  label_dir: ???
-  labels: ???
+  data: /mnt/data/ycevan/datasets/LibriSpeech/pseudolabel_manifest
+  label_dir: /mnt/data/ycevan/datasets/LibriSpeech/labels/960h-hubert-speculte-stg2-target
+  labels: ['km']
   label_rate: ${model.label_rate}
   sample_rate: 16000
   max_sample_size: 250000
@@ -32,22 +21,31 @@ task:
   random_crop: true
   normalize: false # must be consistent with extractor
 
-dataset:
-  num_workers: 6
-  max_tokens: 1400000
-  skip_invalid_size_inputs_valid_test: true
-  validate_interval: 5
-  validate_interval_updates: 10000
+# dataset:
+#   max_tokens: 1400000
+#   skip_invalid_size_inputs_valid_test: true
+#   validate_interval: 5
+#   validate_interval_updates: 10000
 
-criterion:
-  _name: hubert
-  pred_masked_weight: 1.0
-  pred_nomask_weight: 0.0
-  loss_weights: [10,]
+pretrain_expert:
+  datarc:
+    num_workers: 6
+    train_batch_size: 12
+    max_timestep: -200 # Max length for audio feature (0 for no restriction, negative value to set minimum timestep)
+    libri_root: '/work/a129195789/LibriSpeech/' # If raw libri data is provided, use on-the-fly feature extraction, else use the pre-extracted features under `file_path`
+    file_path: 'data/len_for_bucket' # Pre-extracted features path. When using on-the-fly feature extraction, this is used to provide length for bucketing.
+    sets: ['train-clean-100', 'train-clean-360', 'train-other-500'] # can be the subset of ['train-clean-100', 'train-clean-360', 'train-other-500']
+  
+runner:
+  n_epochs: 18
+  total_steps: -1
+  gradient_clipping: 10.0
+  gradient_accumulate_steps: 1
 
-optimization:
-  max_update: 400000
-  clip_norm: 10.0
+  log_step: 200
+  save_step: 50000
+  max_keep: 5
+  fp16: true
 
 optimizer:
   lr: 0.0005
@@ -56,5 +54,4 @@ optimizer:
   weight_decay: 0.01
 
 lr_scheduler:
-  _name: polynomial_decay
   warmup_updates: 32000
