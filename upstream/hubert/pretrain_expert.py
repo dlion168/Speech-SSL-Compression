@@ -74,7 +74,8 @@ class HuBERTPretrainer(nn.Module):
                     params_to_prune,
                     pruning_method=prune.Identity,
                 )
-            try:             
+            try: 
+		all_states["model"].pop("cls_emb")            
                 self.model.load_state_dict(all_states["model"])
                 print(f'[Pretrainer] Load initilization model weight from {self.initial_weight}')
             except:
