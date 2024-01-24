@@ -3,8 +3,8 @@ runner:
   total_steps: 4392000
   gradient_clipping: 10.0
   gradient_accumulate_steps: 1
- 
-  log_step: 500
+  fp16: true
+  log_step: 20
 
 task:
   _name: hubert_pretraining
@@ -25,13 +25,10 @@ pretrain_expert:
     train_batch_size: 12
 
 optimizer:
-  lr: 0.0005
+  lr: 5.e-4
   betas: (0.9,0.98)
   eps: 1e-06
   weight_decay: 0.01
-
-lr_scheduler:
-  warmup_updates: 32000
 
 prune:
   # Prune ${num_layers} heads in each step

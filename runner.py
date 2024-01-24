@@ -303,6 +303,13 @@ class Runner():
             assert max(self.prune_steps) <= total_steps, f'Pruning steps {max(self.prune_steps)} should not be larger than the total training steps {total_steps}'
      
         assert self.runner_config['runner']['total_steps'] > self.runner_config['runner']['log_step']
+        
+        # set amp
+        amp = self.runner_config['runner'].get('fp16', False)
+        if amp:
+            print('[Runner] - Enabled fp16 training')
+            scaler = torch.cuda.amp.GradScaler()
+
         # Set optimizer
         optimizer = self._get_optimizer(self.upstream_pretrainer)
         # scheduler = self._get_lr_scheduler(optimizer=optimizer, total_steps=total_steps) if self.args.upstream != 'melhubert' else None
@@ -310,6 +317,7 @@ class Runner():
         pbar = tqdm(total=self.runner_config['runner']['total_steps'], dynamic_ncols=True, desc='overall')
 
         all_loss = 0
+        all_sample_size = 0
         batch_loss = 0
         global_step = 0
         backward_steps = 0
@@ -352,7 +360,7 @@ class Runner():
                         break
                     global_step = pbar.n + 1
 
-                    loss = self.upstream_pretrainer(
+                    loss, sample_size = self.upstream_pretrainer(
                         data,
                         global_step=global_step,
                         log_step=self.runner_config['runner']['log_step'],
@@ -362,7 +370,10 @@ class Runner():
                         loss = loss / gradient_accumulate_steps
                     if self.args.multi_gpu:
                         loss = loss.sum()
-                    loss.backward()
+                    if amp:
+                        scaler.scale(loss).backward()
+                    else:
+                        loss.backward()
 
                 except RuntimeError as e:
                     if 'CUDA out of memory' in str(e):
@@ -376,6 +387,8 @@ class Runner():
                 # Record loss
                 loss_value = loss.item()
                 all_loss += loss_value
+                all_sample_size += sample_size
+                print(f"loss={loss_value}, sample_size={sample_size}")
                 batch_loss += loss_value
                 del loss
                 
@@ -383,36 +396,51 @@ class Runner():
                 backward_steps += 1
                 if backward_steps % gradient_accumulate_steps > 0:
                     continue
+                
+                # unscale
+                if amp:
+                    scaler.unscale_(optimizer)
 
                 if self.args.mode == 'weight-pruning':
                     # Calculating smooth loss to exam converging during weight pruning
                     self.wp_tools.update_smooth_loss(batch_loss)
                     self.wp_tools.update_target_smooth_loss(global_step)
                     batch_loss = 0        
-              
+
+                for p in self.upstream_pretrainer.model.parameters():
+                    if p.grad is not None:
+                        p.grad = torch.div(p.grad, all_sample_size)
+                
                 # Gradient clipping
                 grad_norm = torch.nn.utils.clip_grad_norm_(self.upstream_pretrainer.model.parameters(), self.runner_config['runner'].get('gradient_clipping', 0))
                 if math.isnan(grad_norm):
                     tqdm.write(f'[Runner] - Error : grad norm is NaN at global step {global_step}')
+                
+                # optimize
+                if amp:
+                    scaler.step(optimizer)
+                    scaler.update()
                 elif not math.isnan(grad_norm):
                     optimizer.step()
-                    # if scheduler != None:
-                    #     scheduler.step()
+
                 optimizer.zero_grad()
 
                 # Logging
                 if global_step % self.runner_config['runner']['log_step'] == 0 or pbar.n == pbar.total -1:
                     # Log lossx
                     if global_step % self.runner_config['runner']['log_step'] == 0:
-                        all_loss /= self.runner_config['runner']['log_step']
+                        # all_loss /= self.runner_config['runner']['log_step']
+                        all_loss /= all_sample_size
                     else:
-                        all_loss /= (global_step % self.runner_config['runner']['log_step'])
+                        # all_loss /= (global_step % self.runner_config['runner']['log_step'])
+                        all_loss /= all_sample_size
                     # print(all_loss)
                     # if global_step == 10:
                     #     exit(0)
                     self.logger.add_scalar(f'{prefix}loss', all_loss, global_step=global_step)
 
                     all_loss = 0
+                    all_sample_size = 0
                     # Log norm
                     self.logger.add_scalar(f'{prefix}gradient norm', grad_norm, global_step=global_step)
                 # Save model at the last step

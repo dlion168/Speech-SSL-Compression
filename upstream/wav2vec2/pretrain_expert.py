@@ -42,7 +42,7 @@ class Wav2vec2Pretrainer(nn.Module):
         # Do initialization from a checkpoint if needed
         if self.initial_weight:
             all_states = torch.load(self.initial_weight, map_location="cpu")
-
+            print(f"loading model {all_states.keys()}")
             # If the attention heads have been pruned 
             if 'Pruned_heads' in all_states:
                 self.pruned_heads = all_states["Pruned_heads"]
@@ -112,4 +112,4 @@ class Wav2vec2Pretrainer(nn.Module):
             data['net_input'][key] = data['net_input'][key].to(self.device)
         loss, sample_size= self.criterion.forward(self.model, data)
         
-        return loss
+        return loss, sample_size

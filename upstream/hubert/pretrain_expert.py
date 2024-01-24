@@ -75,6 +75,7 @@ class HuBERTPretrainer(nn.Module):
                     pruning_method=prune.Identity,
                 )
             try:             
+                all_states["model"].pop('cls_emb')
                 self.model.load_state_dict(all_states["model"])
                 print(f'[Pretrainer] Load initilization model weight from {self.initial_weight}')
             except:
@@ -122,4 +123,4 @@ class HuBERTPretrainer(nn.Module):
             data['target_list'][i] = data['target_list'][i].to(self.device)
         loss, sample_size = self.criterion.forward(self.model, data)
         
-        return loss
+        return loss, sample_size

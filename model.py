@@ -727,7 +727,6 @@ class Wav2Vec2Model(nn.Module):
         else:
             with torch.no_grad():
                 features = self.feature_extractor(source)
-
         features_pen = features.float().pow(2).mean()
 
         features = features.transpose(1, 2)

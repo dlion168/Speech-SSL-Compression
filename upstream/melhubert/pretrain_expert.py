@@ -118,5 +118,5 @@ class MelHuBERTPretrainer(nn.Module):
         if logit_u != None and label_u != None and self.model_config.pred_nomask_weight > 0: 
             loss += self.model_config.pred_nomask_weight * self.loss(logit_u, label_u)
         
-        return loss
+        return loss, 1
         
