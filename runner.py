@@ -301,8 +301,14 @@ class Runner():
         # Check whether the pruning steps is smaller than the total amount of training steps
         if 'pruning' in self.args.mode:
             assert max(self.prune_steps) <= total_steps, f'Pruning steps {max(self.prune_steps)} should not be larger than the total training steps {total_steps}'
-     
         assert self.runner_config['runner']['total_steps'] > self.runner_config['runner']['log_step']
+        
+        # set amp
+        amp = self.runner_config['runner'].get('fp16', False)
+        if amp:
+            print('[Runner] - Enabled fp16 training')
+            scaler = torch.cuda.amp.GradScaler()
+        
         # Set optimizer
         optimizer = self._get_optimizer(self.upstream_pretrainer)
         # scheduler = self._get_lr_scheduler(optimizer=optimizer, total_steps=total_steps) if self.args.upstream != 'melhubert' else None
@@ -362,7 +368,10 @@ class Runner():
                         loss = loss / gradient_accumulate_steps
                     if self.args.multi_gpu:
                         loss = loss.sum()
-                    loss.backward()
+                    if amp:
+                        scaler.scale(loss).backward()
+                    else:
+                        loss.backward()
 
                 except RuntimeError as e:
                     if 'CUDA out of memory' in str(e):
@@ -384,6 +393,10 @@ class Runner():
                 if backward_steps % gradient_accumulate_steps > 0:
                     continue
 
+                # unscale
+                if amp:
+                    scaler.unscale_(optimizer)
+
                 if self.args.mode == 'weight-pruning':
                     # Calculating smooth loss to exam converging during weight pruning
                     self.wp_tools.update_smooth_loss(batch_loss)
@@ -394,10 +407,14 @@ class Runner():
                 grad_norm = torch.nn.utils.clip_grad_norm_(self.upstream_pretrainer.model.parameters(), self.runner_config['runner'].get('gradient_clipping', 0))
                 if math.isnan(grad_norm):
                     tqdm.write(f'[Runner] - Error : grad norm is NaN at global step {global_step}')
+
+                # optimize
+                if amp:
+                    scaler.step(optimizer)
+                    scaler.update()
                 elif not math.isnan(grad_norm):
                     optimizer.step()
-                    # if scheduler != None:
-                    #     scheduler.step()
+
                 optimizer.zero_grad()
 
                 # Logging
