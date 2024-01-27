@@ -288,12 +288,12 @@ class Runner():
         # Convert between pre-training epochs and total steps
         n_epochs = self.runner_config['runner']['n_epochs']
         if n_epochs > 0: 
-            total_steps = int(n_epochs * len(dataloader.dataset) / gradient_accumulate_steps / self.batch_size)
+            total_steps = int(n_epochs * len(dataloader.dataset) / gradient_accumulate_steps)
             self.runner_config['runner']['total_steps'] = total_steps
             print(f'[Runner] - Training for {n_epochs} epochs, which is equivalent to {total_steps} steps')
         else:
-            total_steps = self.runner_config['runner']['total_steps'] / self.batch_size
-            n_epochs = int(total_steps * gradient_accumulate_steps * self.batch_size / len(dataloader.dataset))
+            total_steps = self.runner_config['runner']['total_steps']
+            n_epochs = int(total_steps * gradient_accumulate_steps / len(dataloader.dataset))
             print(f'[Runner] - Training for {total_steps} steps, which is approximately {n_epochs} epochs')
     
         step_per_epoch = len(dataloader.dataset)//gradient_accumulate_steps
@@ -360,11 +360,12 @@ class Runner():
                         break
                     global_step = pbar.n + 1
 
-                    loss, sample_size = self.upstream_pretrainer(
-                        data,
-                        global_step=global_step,
-                        log_step=self.runner_config['runner']['log_step'],
-                    )
+                    with torch.autocast(device_type='cuda', dtype=torch.float16):
+                        loss, sample_size = self.upstream_pretrainer(
+                            data,
+                            global_step=global_step,
+                            log_step=self.runner_config['runner']['log_step'],
+                        )
 
                     if gradient_accumulate_steps > 1:
                         loss = loss / gradient_accumulate_steps
@@ -403,7 +404,7 @@ class Runner():
 
                 if self.args.mode == 'weight-pruning':
                     # Calculating smooth loss to exam converging during weight pruning
-                    self.wp_tools.update_smooth_loss(batch_loss)
+                    self.wp_tools.update_smooth_loss(batch_loss / all_sample_size)
                     self.wp_tools.update_target_smooth_loss(global_step)
                     batch_loss = 0        
 

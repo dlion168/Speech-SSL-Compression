@@ -256,7 +256,7 @@ class HuBERTModel(nn.Module):
                 min_space=self.mask_min_space,
             )
             mask_indices = torch.from_numpy(mask_indices).to(x.device)
-            x[mask_indices] = self.mask_emb
+            x[mask_indices] = self.mask_emb.half()
         else:
             mask_indices = None
         return x, mask_indices
