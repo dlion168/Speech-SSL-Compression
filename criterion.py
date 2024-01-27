@@ -143,4 +143,19 @@ class HubertCriterion():
                     loss += p
                     logging_output[f"loss_{n}"] = p.item()
 
+        def compute_correct(logits):
+            if logits.numel() == 0:
+                return 0, 0
+            else:
+                assert logits.dim() > 1, logits.shape
+                max = logits.argmax(-1) == 0
+                min = logits.argmin(-1) == 0
+                both = max & min
+                corr = max.long().sum().item() - both.long().sum().item()
+                count = max.numel()
+                return corr, count
+
+        corr, count = compute_correct(logp_m_list[0])  
+        # print(corr/count)
+
         return loss, sample_size
