@@ -54,7 +54,7 @@ def index_put(tensor, indices, value):
             indices = indices.expand_as(tensor)
         tensor = torch.mul(tensor, ~indices) + torch.mul(value, indices)
     else:
-        tensor[indices] = value
+        tensor[indices] = torch.tensor(value).half()
     return tensor
 
 

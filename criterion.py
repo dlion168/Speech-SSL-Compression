@@ -156,6 +156,6 @@ class HubertCriterion():
                 return corr, count
 
         corr, count = compute_correct(logp_m_list[0])  
-        # print(corr/count)
+        print(f"label accuracy = {corr/count}")
 
         return loss, sample_size

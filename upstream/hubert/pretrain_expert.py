@@ -74,8 +74,12 @@ class HuBERTPretrainer(nn.Module):
                     params_to_prune,
                     pruning_method=prune.Identity,
                 )
+            nn.init.uniform_(all_states['model']['final_proj.weight'], a=-1.0, b=1.0)
+            nn.init.uniform_(all_states['model']['final_proj.bias'], a=-1.0, b=1.0)
+            nn.init.uniform_(all_states['model']['label_embs_concat'], a=-1.0, b=1.0)
+
             try:             
-                all_states["model"].pop('cls_emb')
+                # all_states["model"].pop('cls_emb')
                 self.model.load_state_dict(all_states["model"])
                 print(f'[Pretrainer] Load initilization model weight from {self.initial_weight}')
             except:

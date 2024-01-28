@@ -154,15 +154,17 @@ class Runner():
     def _get_optimizer(self, model):
         from torch.optim import Adam
         optimizer = Adam(model.parameters(), 
-                         lr = float(self.runner_config.get('lr', 0.001)),
-                         betas = tuple(self.runner_config.get('betas', (0.9, 0.999))),
-                         eps = float(self.runner_config.get('eps', 1.0e-8)),
-                         weight_decay = float(self.runner_config.get('weight_decay', 0)),
+                         lr = float(self.runner_config['optimizer'].get('lr', 0.001)),
+                         betas = tuple(self.runner_config['optimizer'].get('betas', (0.9, 0.999))),
+                         eps = float(self.runner_config['optimizer'].get('eps', 1.0e-8)),
+                         weight_decay = float(self.runner_config['optimizer'].get('weight_decay', 0)),
                     )    
-
         if self.args.init_optimizer_from_initial_weight:
             all_states = torch.load(self.args.initial_weight, map_location="cpu")
-            init_optimizer = all_states["Optimizer"]
+            if "Optimizer" in all_states:
+                init_optimizer = all_states["Optimizer"] 
+            else: 
+                init_optimizer = all_states["last_optimizer_state"]
             try:
                 optimizer.load_state_dict(init_optimizer)
                 print(f'[Runner] Load initilization optimizer weight from {self.args.initial_weight}')
@@ -308,7 +310,7 @@ class Runner():
         amp = self.runner_config['runner'].get('fp16', False)
         if amp:
             print('[Runner] - Enabled fp16 training')
-            scaler = torch.cuda.amp.GradScaler()
+            scaler = torch.cuda.amp.GradScaler(init_scale=64)
 
         # Set optimizer
         optimizer = self._get_optimizer(self.upstream_pretrainer)
@@ -339,13 +341,13 @@ class Runner():
                             pbar.total += self.period
                             self.prune_steps.append(max(self.prune_steps)+self.period)
                 elif self.args.mode  == 'head-pruning':
-                    if (global_step in self.prune_steps) and first_accu:
+                    if ((global_step in self.prune_steps) and first_accu) or global_step % 2000 == 0 or global_step == 78903:
                         # Save model before pruning
                         self.hp_tools.save_model(optimizer, global_step)
                         # Head pruning
-                        self.hp_tools.prune_api()       
+                        # self.hp_tools.prune_api()       
                         # Redefine optimizer 
-                        optimizer = self._get_optimizer(self.upstream_pretrainer)
+                        # optimizer = self._get_optimizer(self.upstream_pretrainer)
                 elif self.args.mode  == 'row-pruning':
                     if (global_step in self.prune_steps) and first_accu:
                         # Save model before pruning
@@ -389,7 +391,6 @@ class Runner():
                 loss_value = loss.item()
                 all_loss += loss_value
                 all_sample_size += sample_size
-                print(f"loss={loss_value}, sample_size={sample_size}")
                 batch_loss += loss_value
                 del loss
                 
@@ -411,7 +412,7 @@ class Runner():
                 for p in self.upstream_pretrainer.model.parameters():
                     if p.grad is not None:
                         p.grad = torch.div(p.grad, all_sample_size)
-                
+
                 # Gradient clipping
                 grad_norm = torch.nn.utils.clip_grad_norm_(self.upstream_pretrainer.model.parameters(), self.runner_config['runner'].get('gradient_clipping', 0))
                 if math.isnan(grad_norm):
@@ -435,9 +436,11 @@ class Runner():
                     else:
                         # all_loss /= (global_step % self.runner_config['runner']['log_step'])
                         all_loss /= all_sample_size
-                    # print(all_loss)
-                    # if global_step == 10:
-                    #     exit(0)
+
+                    # devide loss by log(2)
+                    if (self.args.upstream == "hubert" or self.args.upstream == "wav2vec2"):
+                        all_loss /= 0.69
+                        
                     self.logger.add_scalar(f'{prefix}loss', all_loss, global_step=global_step)
 
                     all_loss = 0

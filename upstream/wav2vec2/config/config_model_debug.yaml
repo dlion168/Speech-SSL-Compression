@@ -1,0 +1,13 @@
+model:
+  _name: wav2vec2
+  quantize_targets: true
+  final_dim: 256
+  encoder_layerdrop: 0.0
+  dropout_input: 0.0
+  dropout_features: 0.0
+  feature_grad_mult: 0.0
+  encoder_embed_dim: 768
+  dropout: 0.0
+  attention_dropout: 0
+  activation_dropout: 0
+  mask_prob: 0

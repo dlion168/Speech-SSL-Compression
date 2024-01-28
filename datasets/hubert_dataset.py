@@ -291,9 +291,9 @@ class HubertDataset(Dataset):
             rem_size = [len(t) - s for t, s in zip(targets, frm_starts)]
             frm_size = min(frm_size, *rem_size)
         targets = [t[s : s + frm_size] for t, s in zip(targets, frm_starts)]
-        logger.debug(f"audio_starts={audio_starts}")
-        logger.debug(f"frame_starts={frm_starts}")
-        logger.debug(f"frame_size={frm_size}")
+        # logger.debug(f"audio_starts={audio_starts}")
+        # logger.debug(f"frame_starts={frm_starts}")
+        # logger.debug(f"frame_size={frm_size}")
 
         lengths = torch.LongTensor([len(t) for t in targets])
         ntokens = lengths.sum().item()
