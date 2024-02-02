@@ -1,9 +1,9 @@
 runner:
   n_epochs: -1
-  total_steps: 326000
+  total_steps: 335000
   gradient_clipping: 10.0
   gradient_accumulate_steps: 1
-  fp16: true
+  fp16: false
  
   log_step: 1
 
@@ -13,6 +13,7 @@ task:
   max_sample_size: 250000
   min_sample_size: 32000
   normalize: false
+  shuffle: false
 
 # runner:
 #   n_epochs: 18
@@ -36,6 +37,10 @@ optimizer:
   eps: 1.e-6
   weight_decay: 0.01
 
+lr_scheduler:
+  _name: polynomial_decay
+  warmup_updates: 32000
+
 prune:
   # Prune ${num_layers} heads in each step
   # TARGET
@@ -49,6 +54,6 @@ prune:
   total_steps: 11 #total pruning steps
   num_heads_each_step: 12 # only for by_whole
   interval: [0, 25000, 50000, 75000, 100000, 125000, 165000, 205000, 245000, 285000, 325000]
-  warm_up: 1000
+  warm_up: 10000
   data_ratio: 0.25 # only used when metric is data-driven
   normalize_by_layer: 2 # normalize data-drive grad by k-norm 

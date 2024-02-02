@@ -42,7 +42,8 @@ class HuBERTPretrainer(nn.Module):
         # Do initialization from a checkpoint if needed
         if self.initial_weight:
             all_states = torch.load(self.initial_weight, map_location="cpu")
-
+            final_proj_w_std, final_proj_w_mean = torch.std_mean(all_states['model']['final_proj.weight'])
+            label_embs_concat_w_std, label_embs_concat_w_mean = torch.std_mean(all_states['model']['label_embs_concat'])
             # If the attention heads have been pruned 
             if 'Pruned_heads' in all_states:
                 self.pruned_heads = all_states["Pruned_heads"]
@@ -74,9 +75,9 @@ class HuBERTPretrainer(nn.Module):
                     params_to_prune,
                     pruning_method=prune.Identity,
                 )
-            nn.init.uniform_(all_states['model']['final_proj.weight'], a=-1.0, b=1.0)
-            nn.init.uniform_(all_states['model']['final_proj.bias'], a=-1.0, b=1.0)
-            nn.init.uniform_(all_states['model']['label_embs_concat'], a=-1.0, b=1.0)
+            nn.init.normal_(all_states['model']['final_proj.weight'], mean=final_proj_w_mean, std=final_proj_w_std)
+            # nn.init.uniform_(all_states['model']['final_proj.bias'], a=-1.0, b=1.0)
+            nn.init.normal_(all_states['model']['label_embs_concat'], mean=label_embs_concat_w_mean, std=label_embs_concat_w_std)
 
             try:             
                 # all_states["model"].pop('cls_emb')

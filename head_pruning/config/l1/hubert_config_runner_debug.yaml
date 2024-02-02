@@ -1,31 +1,32 @@
 runner:
   n_epochs: -1
-  total_steps: 412670
+  total_steps: 335000
   gradient_clipping: 10.0
   gradient_accumulate_steps: 1
   fp16: false #true
-  log_step: 10
+  log_step: 1
 
 task:
   _name: hubert_pretraining
-  data: /mnt/data/ycevan/datasets/LibriSpeech/pseudolabel_manifest
-  label_dir: /mnt/data/ycevan/datasets/LibriSpeech/labels/960h-hubert-speculte-stg2-target
+  data: /mnt/data/ycevan/datasets/LibriSpeech/pseudolabel_manifest_debug
+  label_dir: /mnt/data/ycevan/datasets/LibriSpeech/labels/speculate_debug
   labels: ['km']
   label_rate: 50
   sample_rate: 16000
   max_sample_size: 250000
   min_sample_size: 32000
   pad_audio: false
-  random_crop: true
+  random_crop: false #true
   normalize: false # must be consistent with extractor
+  shuffle: false
 
 pretrain_expert:
   datarc:
     num_workers: 6
-    train_batch_size: 32
+    train_batch_size: 1
 
 optimizer:
-  lr: 1.e-4
+  lr: 5.e-5
   betas: [0.9, 0.98]
   eps: 1e-06
   weight_decay: 0.01
@@ -46,6 +47,6 @@ prune:
   total_steps: 11 #total pruning steps
   num_heads_each_step: 12 # only for by_whole
   interval: [0, 25000, 50000, 75000, 100000, 125000, 165000, 205000, 245000, 285000, 325000]
-  warm_up: 87670
+  warm_up: 10000
   data_ratio: 0.25 # only used when metric is data-driven
   normalize_by_layer: 2 # normalize data-drive grad by k-norm 

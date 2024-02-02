@@ -256,7 +256,7 @@ class HuBERTModel(nn.Module):
                 min_space=self.mask_min_space,
             )
             mask_indices = torch.from_numpy(mask_indices).to(x.device)
-            x[mask_indices] = self.mask_emb.half()
+            x[mask_indices] = self.mask_emb #.half()
         else:
             mask_indices = None
         return x, mask_indices
@@ -350,7 +350,7 @@ class HuBERTModel(nn.Module):
         else:
             x = features
             mask_indices = None
-
+        # same x here
         # feature: (B, T, D), float
         # target: (B, T), long
         # x: (B, T, D), float
@@ -361,7 +361,7 @@ class HuBERTModel(nn.Module):
             padding_mask=padding_mask,
             layer=None if output_layer is None else output_layer - 1,
         )
-
+        # different x here
         if features_only:
             return {"x": x, "padding_mask": padding_mask, "features": features}
 
@@ -521,6 +521,8 @@ class Wav2Vec2Model(nn.Module):
 
         if cfg.quantize_targets:
             vq_dim = cfg.latent_dim if cfg.latent_dim > 0 else final_dim
+            # Check same initialization for qunatizer: OK
+            # Quantizer source code: OK
             self.quantizer = GumbelVectorQuantizer(
                 dim=self.embed,
                 num_vars=cfg.latent_vars,
@@ -535,7 +537,7 @@ class Wav2Vec2Model(nn.Module):
             self.project_q = nn.Linear(vq_dim, final_dim)
         else:
             self.project_q = nn.Linear(self.embed, final_dim)
-
+    
         self.mask_emb = nn.Parameter(
             torch.FloatTensor(cfg.encoder_embed_dim).uniform_()
         )
@@ -728,11 +730,11 @@ class Wav2Vec2Model(nn.Module):
             with torch.no_grad():
                 features = self.feature_extractor(source)
         features_pen = features.float().pow(2).mean()
-
+        # [DEBUG] same features_pen here
         features = features.transpose(1, 2)
         features = self.layer_norm(features)
         unmasked_features = features.clone()
-
+        # [DEBUG] same unmasked_features here
         if padding_mask is not None: #and padding_mask.any():
             input_lengths = (1 - padding_mask.long()).sum(-1)
             # apply conv formula to get real output_lengths
@@ -800,11 +802,11 @@ class Wav2Vec2Model(nn.Module):
             x = features
             y = unmasked_features
             mask_indices = None
-            
+        
         x, layer_results = self.encoder(
             x, padding_mask=padding_mask, layer=layer
         )
-
+        # [DEBUG] same x, y, layer_result here
         if features_only:
             return {
                 "x": x,
@@ -833,11 +835,12 @@ class Wav2Vec2Model(nn.Module):
             else:
                 q = self.quantizer(y, produce_targets=False)
                 y = q["x"]
+                # [DEBUG] differnt y accross epoch and across model
                 num_vars = q["num_vars"]
                 code_ppl = q["code_perplexity"]
                 prob_ppl = q["prob_perplexity"]
                 curr_temp = q["temp"]
-
+                # [DEBUG] same num_var, code_ppl, prob_ppl
                 y = self.project_q(y)
 
                 negs, _ = self.sample_negatives(
@@ -871,7 +874,8 @@ class Wav2Vec2Model(nn.Module):
                     y.size(1),
                     padding_count=padding_count,
                 )
-
+        # [DEBUG] same x accross epoch and across model
+        # [DEBUG] differnt y accross epoch and across model
         if not is_xla_tensor(x):
             # tpu-comment: reducing the size in a dynamic way causes
             # too many recompilations on xla.
@@ -883,7 +887,8 @@ class Wav2Vec2Model(nn.Module):
 
         x = self.final_proj(x)
         x = self.compute_preds(x, y, negs)
-
+        # [DEBUG] different between batch and models here
+        
         result = {
             "x": x,
             "padding_mask": padding_mask,

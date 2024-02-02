@@ -13,6 +13,7 @@ class HubertTaskConfig:
         self.label_rate = float(config.get("label_rate", -1.0))
         self.sample_rate = int(config.get("sample_rate", 16_000))
         self.normalize = bool(config.get("normalize", False))
+        self.shuffle = bool(config.get("shuffle", True))
         self.enable_padding = bool(config.get("enable_padding", False))
         self.max_keep_size = int(config["max_keep_size"]) if "max_keep_size" in config else None
         self.max_sample_size = int(config["max_sample_size"]) if "max_sample_size" in config else None

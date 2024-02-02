@@ -363,8 +363,8 @@ class HeadPruningTools():
         }
         all_states = self.upstream.add_state_to_save(all_states)
 
-        # name = f'states_prune_{self.total_heads}.ckpt'
-        name = f'states_prune_{global_step}.ckpt'
+        name = f'states_prune_{self.total_heads}.ckpt'
+        # name = f'states_prune_{global_step}.ckpt'
         save_path = os.path.join(self.args.expdir, name)
         tqdm.write(f'[Head Pruning] - Save the checkpoint to: {save_path}')
         tqdm.write('[Head Pruning] - Number of parameters saved: '+str(sum(p.numel() for p in all_states['model'].values())))

@@ -149,7 +149,8 @@ def compute_mask_indices(
             )
 
         mask[i, mask_idc] = True
-
+    # mask = np.full(mask.shape, False)
+    # mask[0] = np.full(mask[0].shape, True)
     return mask
 
 def collate_tokens(

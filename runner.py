@@ -158,7 +158,7 @@ class Runner():
                          betas = tuple(self.runner_config['optimizer'].get('betas', (0.9, 0.999))),
                          eps = float(self.runner_config['optimizer'].get('eps', 1.0e-8)),
                          weight_decay = float(self.runner_config['optimizer'].get('weight_decay', 0)),
-                    )    
+                    )
         if self.args.init_optimizer_from_initial_weight:
             all_states = torch.load(self.args.initial_weight, map_location="cpu")
             if "Optimizer" in all_states:
@@ -174,14 +174,14 @@ class Runner():
         return optimizer
     
     
-    # def _get_lr_scheduler(self, optimizer, total_steps):
+    def _get_lr_scheduler(self, optimizer, total_steps):
 
-    #     from torch.optim.lr_scheduler import LambdaLR, PolynomialLR, SequentialLR
-    #     scheduler1 = LambdaLR(optimizer, lr_lambda= lambda x: x/int(self.runner_config['lr_scheduler']['warmup_updates']))
-    #     scheduler2 = PolynomialLR(optimizer, total_iters = total_steps - int(self.runner_config['lr_scheduler']['warmup_updates']))
-    #     scheduler = SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[self.runner_config['lr_scheduler']['warmup_updates']])
+        from torch.optim.lr_scheduler import LambdaLR, PolynomialLR, SequentialLR
+        scheduler1 = LambdaLR(optimizer, lr_lambda= lambda x: x/int(self.runner_config['lr_scheduler']['warmup_updates']))
+        scheduler2 = PolynomialLR(optimizer, total_iters = total_steps - int(self.runner_config['lr_scheduler']['warmup_updates']))
+        scheduler = SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[self.runner_config['lr_scheduler']['warmup_updates']])
 
-    #     return scheduler
+        return scheduler
     
     def step_update(self, num_updates):
         """Update the learning rate after each update."""
@@ -235,6 +235,7 @@ class Runner():
                 label_rates=task_cfg.label_rate,
                 pad_list=pad_list,
                 eos_list=eos_list,
+                shuffle=task_cfg.shuffle,
                 label_processors=procs,
                 max_keep_sample_size=task_cfg.max_keep_size,
                 min_keep_sample_size=task_cfg.min_sample_size,
@@ -260,9 +261,10 @@ class Runner():
                     sample_rate=task_cfg.sample_rate,
                     max_sample_size=task_cfg.max_sample_size,
                     min_sample_size=task_cfg.min_sample_size,
+                    shuffle=task_cfg.shuffle, 
                     pad=task_cfg.labels is not None or task_cfg.enable_padding,
                     normalize=task_cfg.normalize,
-                    num_buckets=task_cfg.num_batch_buckets or int(task_cfg.tpu),
+                    num_buckets=task_cfg.num_batch_buckets,
                     text_compression_level=text_compression_level,
                     compute_mask=compute_mask,
                     **mask_args,
@@ -270,7 +272,7 @@ class Runner():
         dataloader = DataLoader(
             dataset, 
             batch_size = self.batch_size, # for bucketing
-            shuffle=True, 
+            shuffle = True,
             num_workers=self.runner_config['pretrain_expert']['datarc']['num_workers'],
             drop_last=False, 
             pin_memory=True, 
@@ -284,7 +286,7 @@ class Runner():
         # Prepare data
         gradient_accumulate_steps = self.runner_config['runner']['gradient_accumulate_steps']
         print('[Runner] - Accumulated batch size:', 
-              self.runner_config['pretrain_expert']['datarc']['train_batch_size'] * gradient_accumulate_steps)
+              self.batch_size * gradient_accumulate_steps)
         # Get dataloader
         dataloader = self._get_dataloader()
         # Convert between pre-training epochs and total steps
@@ -314,7 +316,9 @@ class Runner():
 
         # Set optimizer
         optimizer = self._get_optimizer(self.upstream_pretrainer)
-        # scheduler = self._get_lr_scheduler(optimizer=optimizer, total_steps=total_steps) if self.args.upstream != 'melhubert' else None
+        schedule = 'lr_scheduler' in self.runner_config
+        if schedule:
+            scheduler = self._get_lr_scheduler(optimizer=optimizer, total_steps=total_steps) if self.args.upstream != 'melhubert' else None
         # set progress bar
         pbar = tqdm(total=self.runner_config['runner']['total_steps'], dynamic_ncols=True, desc='overall')
 
@@ -341,13 +345,13 @@ class Runner():
                             pbar.total += self.period
                             self.prune_steps.append(max(self.prune_steps)+self.period)
                 elif self.args.mode  == 'head-pruning':
-                    if ((global_step in self.prune_steps) and first_accu) or global_step % 2000 == 0 or global_step == 78903:
+                    if ((global_step in self.prune_steps) and first_accu):
                         # Save model before pruning
                         self.hp_tools.save_model(optimizer, global_step)
                         # Head pruning
-                        # self.hp_tools.prune_api()       
+                        self.hp_tools.prune_api()       
                         # Redefine optimizer 
-                        # optimizer = self._get_optimizer(self.upstream_pretrainer)
+                        optimizer = self._get_optimizer(self.upstream_pretrainer)
                 elif self.args.mode  == 'row-pruning':
                     if (global_step in self.prune_steps) and first_accu:
                         # Save model before pruning
@@ -362,13 +366,13 @@ class Runner():
                         break
                     global_step = pbar.n + 1
 
-                    with torch.autocast(device_type='cuda', dtype=torch.float16):
+                    with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=amp):
                         loss, sample_size = self.upstream_pretrainer(
                             data,
                             global_step=global_step,
                             log_step=self.runner_config['runner']['log_step'],
                         )
-
+                    # print(f"loss = {loss}, sample_size = {sample_size}")
                     if gradient_accumulate_steps > 1:
                         loss = loss / gradient_accumulate_steps
                     if self.args.multi_gpu:
@@ -415,6 +419,7 @@ class Runner():
 
                 # Gradient clipping
                 grad_norm = torch.nn.utils.clip_grad_norm_(self.upstream_pretrainer.model.parameters(), self.runner_config['runner'].get('gradient_clipping', 0))
+                # print(f"grad_norm = {grad_norm}")
                 if math.isnan(grad_norm):
                     tqdm.write(f'[Runner] - Error : grad norm is NaN at global step {global_step}')
                 
@@ -423,8 +428,9 @@ class Runner():
                     scaler.step(optimizer)
                     scaler.update()
                 elif not math.isnan(grad_norm):
-                    optimizer.step()
-
+                   optimizer.step()
+                if schedule:
+                    scheduler.step()
                 optimizer.zero_grad()
 
                 # Logging
@@ -446,7 +452,10 @@ class Runner():
                     all_loss = 0
                     all_sample_size = 0
                     # Log norm
-                    self.logger.add_scalar(f'{prefix}gradient norm', grad_norm, global_step=global_step)
+                    self.logger.add_scalar(f'{prefix}gradient_norm', grad_norm, global_step=global_step)
+                    self.logger.add_scalar(f'lr', optimizer.param_groups[0]['lr'], global_step=global_step)
+                    if amp:
+                        self.logger.add_scalar(f'{prefix}loss_scale', scaler.get_scale(), global_step=global_step)
                 # Save model at the last step
                 if pbar.n == pbar.total-1:
                     if self.args.mode in ['melhubert', 'distillation']:
