@@ -47,12 +47,12 @@ def get_params_to_prune(upstream, bias=True):
             
     return params_to_prune, name_filter
 
-    def _resume_random_state(state):
-        if state:
-            random.setstate(state['random'])
-            np.random.set_state(state['numpy'])
-            torch.set_rng_state(state['torch'])
-            torch.cuda.set_rng_state(state['torch.cuda'])
+def _resume_random_state(state):
+    if state:
+        random.setstate(state['random'])
+        np.random.set_state(state['numpy'])
+        torch.set_rng_state(state['torch'])
+        torch.cuda.set_rng_state(state['torch.cuda'])
 
 class WeightPruningTools():
     def __init__(self, args, runner_config, upstream_config, upstream, initial_weight):
@@ -66,9 +66,16 @@ class WeightPruningTools():
         self.prune_strategy = self.runner_config["prune"]["strategy"]
         # Set pruning-related parameters
         self.n_iters = self.runner_config["prune"].get("n_iters", 38)
-        self.warnup = self.runner_config["prune"].get("warnup", 25000)
+        self.warmup = self.runner_config["prune"].get("warmup", 25000)
+        if type(self.runner_config["prune"]["period"]) == int:
+            self.period = self.runner_config["prune"].get("period", 25000)
+        elif type(self.runner_config["prune"]["period"]) == list:
+            self.period = self.runner_config["prune"]["period"]
+        else:
+            raise NotImplementedError
         self.period = self.runner_config["prune"].get("period", 25000)
-        assert self.warnup > 0 and self.period > 0, f"Do not set warnup and period to 0."
+        # assert self.warmup > 0 and self.period > 0, f"Do not set warmup and period to 0."
+        assert self.warmup > 0, f"Do not set warmup and period to 0."
         self.avg_len = self.runner_config["prune"].get("average_length", 15000)
         self.con_tol = self.runner_config["prune"].get("converge_loss_tolerance", 0.001)
         # Setup pruning sparsity
@@ -79,14 +86,17 @@ class WeightPruningTools():
         else:
             raise NotImplementedError
         # Define the pruning steps (only support fixed interval)
-        self.prune_steps = list(self.warnup + (np.arange(self.n_iters) * self.period))
+        if type(self.period) == int:
+            self.prune_steps = list(self.warmup + (np.arange(self.n_iters) * self.period))
+        else:
+            self.prune_steps = list(self.warmup + np.array(self.period))
+        assert len(self.prune_steps) == len(self.sparsity)
         # Smooth loss is used to exam converging during iteratively weight pruning 
         self.smooth_loss = None 
         self.tgt_smooth_loss = -float("inf")
         self.smooth_factor = self.runner_config['prune'].get('smooth_factor', 0.999)
         self.buffer_loss = [] 
         self.pruning_times = 0
-
         params_to_prune, _ = get_params_to_prune(self.upstream.model)
         prune.global_unstructured(
             params_to_prune,
@@ -106,7 +116,7 @@ class WeightPruningTools():
 
         print("="*40 + "\n[Weight Pruning] - Pruning-related hyperparameters:")
         print(f"Pruning iterations: {self.n_iters}")
-        print(f"Warnup steps: {self.warnup}")
+        print(f"Warmup steps: {self.warmup}")
         print(f"Pruning steps: {self.prune_steps}")
         print("="*40)
 
@@ -122,8 +132,8 @@ class WeightPruningTools():
 
     def update_target_smooth_loss(self, global_step):
         # Recording smooth loss n steps before pruning to exam converging 
-        if (self.prune_condition == "converge" and global_step > self.warnup and
-                (global_step - self.warnup + self.avg_len) in self.prune_steps):
+        if (self.prune_condition == "converge" and global_step > self.warmup and
+                (global_step - self.warmup + self.avg_len) in self.prune_steps):
             self.tgt_smooth_loss = self.smooth_loss
         
     def prune_api(self, optimizer, global_step, total_step):

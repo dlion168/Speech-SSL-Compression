@@ -297,7 +297,7 @@ class Runner():
             print(f'[Runner] - Training for {n_epochs} epochs, which is equivalent to {total_steps} steps')
         else:
             total_steps = self.runner_config['runner']['total_steps']
-            n_epochs = int(total_steps * gradient_accumulate_steps / len(dataloader.dataset))
+            n_epochs = int(total_steps * gradient_accumulate_steps / len(dataloader.dataset) * self.batch_size)
             print(f'[Runner] - Training for {total_steps} steps, which is approximately {n_epochs} epochs')
     
         step_per_epoch = len(dataloader.dataset)//gradient_accumulate_steps
@@ -381,7 +381,6 @@ class Runner():
                         scaler.scale(loss).backward()
                     else:
                         loss.backward()
-
                 except RuntimeError as e:
                     if 'CUDA out of memory' in str(e):
                         tqdm.write(f'[Runner] - CUDA out of memory at step {global_step}')
@@ -418,7 +417,7 @@ class Runner():
                         p.grad = torch.div(p.grad, all_sample_size)
 
                 # Gradient clipping
-                grad_norm = torch.nn.utils.clip_grad_norm_(self.upstream_pretrainer.model.parameters(), self.runner_config['runner'].get('gradient_clipping', 0))
+                grad_norm = torch.nn.utils.clip_grad_norm_(self.upstream_pretrainer.model.parameters(), self.runner_config['runner'].get('gradient_clipping', 0)).detach()
                 # print(f"grad_norm = {grad_norm}")
                 if math.isnan(grad_norm):
                     tqdm.write(f'[Runner] - Error : grad norm is NaN at global step {global_step}')
@@ -428,11 +427,11 @@ class Runner():
                     scaler.step(optimizer)
                     scaler.update()
                 elif not math.isnan(grad_norm):
-                   optimizer.step()
+                    optimizer.step()
                 if schedule:
                     scheduler.step()
                 optimizer.zero_grad()
-
+                
                 # Logging
                 if global_step % self.runner_config['runner']['log_step'] == 0 or pbar.n == pbar.total -1:
                     # Log lossx

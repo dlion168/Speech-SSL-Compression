@@ -34,7 +34,7 @@ class RowPruningTools():
     def prune_api(self):
         self.prune(self.upstream.model.encoder)
         self.total_ffn_dim -= self.num_rows_each_step
-        self.upstream.upstream_config['melhubert']['encoder_ffn_embed_dim'] = self.total_ffn_dim
+        self.upstream.upstream_config['model']['encoder_ffn_embed_dim'] = self.total_ffn_dim
         tqdm.write(f"[Row Pruning] {self.total_ffn_dim} hidden dimension are remained in fead forward network")
 
     def prune(self, encoder):

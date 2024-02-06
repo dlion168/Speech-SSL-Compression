@@ -11,9 +11,8 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from typing import List, Tuple
-from fairseq_code import get_activation_fn, SamePad, TransposeLast, init_bert_params, index_put, pad_to_multiple , MultiheadAttention
+from .fairseq_code import get_activation_fn, SamePad, TransposeLast, init_bert_params, index_put, pad_to_multiple, MultiheadAttention
 # from fairseq.modules.multihead_attention import MultiheadAttention
-from model_config import Wav2Vec2Config
 
 class TransformerSentenceEncoderLayer(nn.Module):
     """
@@ -395,7 +394,7 @@ def make_conv_pos(e, k, g):
     return pos_conv
     
 class Wav2vec2TransformerEncoder(nn.Module):
-    def build_encoder_layer(self, args: Wav2Vec2Config):
+    def build_encoder_layer(self, args):
         layer = Wav2Vec2TransformerSentenceEncoderLayer(
             embedding_dim=self.embedding_dim,
             ffn_embedding_dim=args.encoder_ffn_embed_dim,
@@ -408,7 +407,7 @@ class Wav2vec2TransformerEncoder(nn.Module):
         )
         return layer
 
-    def __init__(self, args: Wav2Vec2Config):
+    def __init__(self, args):
         super().__init__()
 
         self.dropout = args.dropout
