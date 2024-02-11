@@ -7,7 +7,7 @@ runner:
   log_step: 50
   # Save checkpoint for every save_every_x_epochs epochs
   # save_every_x_epochs: 4
-  save_steps: 1 # 10000
+  save_steps: 10000
   fp16: true
 
 optimizer:
