@@ -192,3 +192,60 @@ class Wav2Vec2Config:
         # FP16 Optimization
         self.required_seq_len_multiple = int(config.get("required_seq_len_multiple", 2))
         self.crop_seq_to_multiple = int(config.get("crop_seq_to_multiple", 1))
+
+class MelHuBERTDistillerConfig:
+    """
+    Configuration class
+    """
+
+    def __init__(self, config: dict):
+        # Input feature dimemsion 
+        self.feat_emb_dim = int(config.get("feat_emb_dim", 40))
+
+        # Convolutional relative positional encoding
+        self.pos_emb_type = str(config.get("pos_emb_type", "conv"))
+        self.pos_conv_depth = int(config.get("pos_conv_depth", 1))
+        self.conv_pos = int(config.get("conv_pos", 128))
+        self.conv_pos_groups = int(config.get("conv_pos_groups", 16))
+        
+        self.learnable_mask_emb = bool(config.get("learnable_mask_emb", False))
+        self.mask_before_proj = bool(config.get("mask_before_proj", True))
+
+        # Transformer encoder
+        self.encoder_layers = int(config.get("encoder_layers", 1))
+        self.encoder_embed_dim = int(config.get("encoder_embed_dim", 768))
+        self.encoder_ffn_embed_dim = int(config.get("encoder_ffn_embed_dim", 3072))
+        self.encoder_attention_heads = int(config.get("encoder_attention_heads", 12))
+        self.activation_fn = str(config.get("activation_fn", "gelu"))
+        self.layer_norm_first = bool(config.get("layer_norm_first", False))
+        self.attention_type = str(config.get("attention_type", "original"))
+
+        # Dropout
+        self.dropout = float(config.get("dropout", 0.1))
+        self.attention_dropout = float(config.get("attention_dropout", 0.1))
+        self.activation_dropout = float(config.get("activation_dropout", 0.1))
+        self.encoder_layerdrop = float(config.get("encoder_layerdrop", 0.0))
+
+        # Output
+        self.final_dim = int(config.get("final_dim", 768))
+        self.out_layer_type = str(config.get("out_layer_type", "expand-last"))
+        self.out_layer_inter_dim = int(config.get("out_layer_inter_dim", -1))
+
+        # Task & loss
+        self.n_tasks = int(config.get("n_tasks", 12))
+        self.task_emb_type = str(config.get("task_emb_type", "expand-last"))
+        self.task_emb_size = int(config.get("task_emb_size", 0))
+        self.layer_emb_size = int(config.get("layer_emb_size", 0))
+        self.loss_type = str(config.get("loss_type", "l1"))
+        self.feat_pen_loss = float(config.get("feat_pen_loss", 0.0))
+        self.cosine_loss = float(config.get("cosine_loss", 0.0))
+
+        # When task_emb_type == 'expand-last' only
+        self.pred_layer_id = list(
+            config.get("pred_layer_id", range(1, self.n_tasks + 1))
+        )
+
+        # Initialization
+        self.initial_from_teacher = bool(
+            config.get("initial_from_teacher", False)
+        )

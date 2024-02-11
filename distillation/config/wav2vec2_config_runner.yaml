@@ -1,0 +1,30 @@
+runner:
+  n_epochs: 200
+  total_steps: -1
+  gradient_clipping: 10.0
+  gradient_accumulate_steps: 2
+
+  log_step: 5
+  # Save checkpoint for every save_every_x_epochs epochs
+  save_every_x_epochs: 4
+
+  fp16: true
+
+task:
+  _name: audio_pretraining
+  data: /mnt/data/ycevan/datasets/LibriSpeech/manifest
+  max_sample_size: 250000
+  min_sample_size: 32000
+  normalize: false
+
+optimizer:
+  lr: 1.e-4
+  betas: [0.9, 0.999]
+  eps: 1.e-8
+  weight_decay: 0
+  
+pretrain_expert:
+  datarc:
+    num_workers: 6
+    train_batch_size: 16
+    

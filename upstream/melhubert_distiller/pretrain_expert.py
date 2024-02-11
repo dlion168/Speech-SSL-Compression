@@ -45,12 +45,23 @@ class MelHuBERTDistiller(nn.Module):
         # Define student model architecture
         self.student_config = MelHuBERTConfig(self.upstream_config['student'])
         self.model = MelHuBERTModel(self.student_config)
+        
+         # Load student model's weight if existed
+        if self.initial_weight:
+            stu_all_states = torch.load(self.initial_weight, map_location="cpu")
+            try:             
+                self.model.load_state_dict(stu_all_states["model"])
+                print(f'[Distiller] Load student initilization model weight from {self.initial_weight}')
+            except:
+               raise NotImplementedError('Could not load the initilization weight')
+        
         # Define teacher model architecture
         self.teacher_config = MelHuBERTConfig(self.upstream_config['teacher'])
         self.teacher_model = MelHuBERTModel(self.teacher_config)
+        
         # Load teacher model's weight
-        assert self.initial_weight, 'Please specify teacher\'s weight by -i argument'
-        all_states = torch.load(self.initial_weight, map_location="cpu")
+        assert 'init_path' in self.upstream_config['teacher'], 'Please specify teacher\'s weight by self.upstream_config["teacher"]["init_ckpt"]'
+        all_states = torch.load(self.upstream_config['teacher']["init_ckpt"], map_location="cpu")
         try:             
             self.teacher_model.load_state_dict(all_states["model"])
             print(f'[Distiller] - Load teacher model\'s weight from {self.initial_weight}')

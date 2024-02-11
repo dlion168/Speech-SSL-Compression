@@ -41,8 +41,9 @@ class Runner():
         self.dataset_to_epoch_iter = dict()
         self.logger = SummaryWriter(args.expdir)                                                     
         self.upstream_config = yaml.load(open(self.args.upstream_config, 'r'), Loader=yaml.FullLoader)
+        self.init_ckpt = torch.load(self.args.initial_weight, map_location='cpu') if self.args.initial_weight else {}
         self.upstream_pretrainer = self._get_upstream()
-        self.batch_size = 1 if self.args.upstream == 'melhubert' else int(self.runner_config['pretrain_expert']['datarc']['train_batch_size'])
+        self.batch_size = int(self.runner_config['pretrain_expert']['datarc']['train_batch_size'])
 
         # Assert the dimension of input projection layer
         if self.args.upstream == 'melhubert':
@@ -52,16 +53,15 @@ class Runner():
                 assert self.upstream_config['melhubert']['feat_emb_dim'] == 40, f'Feature embedding dimension should be {40} when the frame period is {10}'
             
         # Mode of pre-training
-        if args.mode == 'melhubert':
-            print(f'[Runner] Mode: Pre-training {self.args.upstream}')
-            from upstream.melhubert.mh_utils import MelHuBERTTools
-            self.mh_tools = MelHuBERTTools(
+        if args.mode == 'melhubert' or args.mode == 'melhubert_embedding_distiller' or args.mode == 'distillation':
+            print(f'[Runner] Mode: Pre-training {args.mode}')
+            from upstream.base_utils import BaseTools
+            self.base_tools = BaseTools(
                 self.args,
                 self.runner_config,
                 self.upstream_config,
                 self.upstream_pretrainer
             )
-            self.save_every_x_epochs = self.mh_tools.save_every_x_epochs
         elif args.mode == 'weight-pruning':
             print(f'[Runner] Mode: weight-pruning on {self.args.upstream}')
             from weight_pruning.wp_utils import WeightPruningTools
@@ -109,26 +109,14 @@ class Runner():
                 total_prune_steps=self.runner_config['prune']['total_steps']
             )
             assert len(self.prune_steps) == self.total_prune_step, 'The length of pruning interval should equal to the total pruning steps' 
-        elif args.mode == 'distillation':
-            print(f'[Runner] Mode: distillation on MelHuBERT')
-            from upstream.melhubert_distiller.pretrain_expert import MelHuBERTDistiller
-            from upstream.melhubert.mh_utils import MelHuBERTTools
-            self.upstream_pretrainer = MelHuBERTDistiller(
-                self.upstream_config,
-                self.args.initial_weight,
-                self.args.device,
-                self.args.multi_gpu,).to(self.args.device)
-            self.mh_tools = MelHuBERTTools(
-                self.args,
-                self.runner_config,
-                self.upstream_config,
-                self.upstream_pretrainer
-            )
-            self.save_every_x_epochs = self.mh_tools.save_every_x_epochs
         else:
             print('We do not support this mode currently.')
 
     def _get_upstream(self):
+        # init_upstream = self.init_ckpt.get('Upstream_Config')
+        # if init_upstream:
+        #     self.upstream_config = init_upstream
+        
         module_path = f'upstream.{self.args.upstream}'
         Upstream = getattr(importlib.import_module(module_path), 'UpstreamPretrainExpert')
         if self.args.upstream == 'hubert':
@@ -149,17 +137,22 @@ class Runner():
         assert hasattr(upstream, 'forward')
         assert hasattr(upstream, 'load_model')
         assert hasattr(upstream, 'add_state_to_save')
+        
+        if self.init_ckpt != {}:
+            print('[Runner] - Loading upstream weights from the previous experiment')
+            upstream.load_model(self.init_ckpt)
+            
         return upstream
 
     def _get_optimizer(self, model):
-        from torch.optim import Adam
-        optimizer = Adam(model.parameters(), 
+        from torch.optim import AdamW
+        optimizer = AdamW(model.parameters(), 
                          lr = float(self.runner_config['optimizer'].get('lr', 0.001)),
                          betas = tuple(self.runner_config['optimizer'].get('betas', (0.9, 0.999))),
                          eps = float(self.runner_config['optimizer'].get('eps', 1.0e-8)),
                          weight_decay = float(self.runner_config['optimizer'].get('weight_decay', 0)),
                     )
-        if self.args.init_optimizer_from_initial_weight:
+        if self.args.init_optimizer_from_initial_weight or self.init_ckpt:
             all_states = torch.load(self.args.initial_weight, map_location="cpu")
             if "Optimizer" in all_states:
                 init_optimizer = all_states["Optimizer"] 
@@ -180,6 +173,12 @@ class Runner():
         scheduler1 = LambdaLR(optimizer, lr_lambda= lambda x: x/int(self.runner_config['lr_scheduler']['warmup_updates']))
         scheduler2 = PolynomialLR(optimizer, total_iters = total_steps - int(self.runner_config['lr_scheduler']['warmup_updates']))
         scheduler = SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[self.runner_config['lr_scheduler']['warmup_updates']])
+        
+        if self.init_ckpt != {}:
+            init_scheduler = self.init_ckpt.get('Scheduler')
+            assert init_scheduler
+            print('[Runner] - Loading scheduler weights from the previous experiment')
+            scheduler.load_state_dict(init_scheduler)
 
         return scheduler
     
@@ -211,13 +210,13 @@ class Runner():
         return self.runner_config['task']['data'] if self.runner_config['task']['label_dir'] is None else self.runner_config['task']['label_dir']
 
     def _get_dataloader(self,):
-        if self.args.upstream == 'melhubert':
+        if self.args.upstream == 'melhubert' or 'melhubert_embedding_distiller':
             dataset = MelFeatDataset(
                 self.args.frame_period,
                 self.upstream_config['task'],
-                self.runner_config['datarc']['train_batch_size'],
-                self.runner_config['datarc']['sets'],
-                self.runner_config['datarc']['max_timestep'],
+                self.runner_config['pretrain_expert']['datarc']['train_batch_size'],
+                self.runner_config['pretrain_expert']['datarc']['sets'],
+                self.runner_config['pretrain_expert']['datarc']['max_timestep'],
             )
         elif self.args.upstream == 'hubert':
             split = 'train'
@@ -246,7 +245,7 @@ class Runner():
                 random_crop=task_cfg.random_crop,
                 single_target=task_cfg.single_target,
             )
-        elif self.args.upstream == 'wav2vec2':
+        elif 'wav2vec2' in self.args.upstream :
             split = 'train'
             task_cfg = Wav2vec2TaskConfig(self.args, self.runner_config['task'])
             data_path = task_cfg.data
@@ -271,7 +270,7 @@ class Runner():
                 )
         dataloader = DataLoader(
             dataset, 
-            batch_size = self.batch_size, # for bucketing
+            batch_size = 1 if 'melhubert' in self.args.upstream else self.batch_size, # for bucketing
             shuffle = True,
             num_workers=self.runner_config['pretrain_expert']['datarc']['num_workers'],
             drop_last=False, 
@@ -292,12 +291,12 @@ class Runner():
         # Convert between pre-training epochs and total steps
         n_epochs = self.runner_config['runner']['n_epochs']
         if n_epochs > 0: 
-            total_steps = int(n_epochs * len(dataloader.dataset) / gradient_accumulate_steps)
+            total_steps = int(n_epochs * len(dataloader.dataset) / self.batch_size / gradient_accumulate_steps)
             self.runner_config['runner']['total_steps'] = total_steps
             print(f'[Runner] - Training for {n_epochs} epochs, which is equivalent to {total_steps} steps')
         else:
             total_steps = self.runner_config['runner']['total_steps']
-            n_epochs = int(total_steps * gradient_accumulate_steps / len(dataloader.dataset) * self.batch_size)
+            n_epochs = int(total_steps * gradient_accumulate_steps / len(dataloader.dataset) * self.batch_size) if 'melhubert' not in self.args.upstream else int(total_steps * gradient_accumulate_steps / len(dataloader.dataset)) 
             print(f'[Runner] - Training for {total_steps} steps, which is approximately {n_epochs} epochs')
     
         step_per_epoch = len(dataloader.dataset)//gradient_accumulate_steps
@@ -319,8 +318,13 @@ class Runner():
         schedule = 'lr_scheduler' in self.runner_config
         if schedule:
             scheduler = self._get_lr_scheduler(optimizer=optimizer, total_steps=total_steps) if self.args.upstream != 'melhubert' else None
+        else:
+            scheduler = None
         # set progress bar
         pbar = tqdm(total=self.runner_config['runner']['total_steps'], dynamic_ncols=True, desc='overall')
+        init_step = self.init_ckpt.get('Step')
+        if init_step:
+            pbar.n = init_step
 
         all_loss = 0
         all_sample_size = 0
@@ -332,11 +336,12 @@ class Runner():
         while pbar.n < pbar.total:
             for data in tqdm(dataloader, dynamic_ncols=True, desc='train'):
                 first_accu = (backward_steps % gradient_accumulate_steps == 0) 
-                if self.args.mode in ['melhubert', 'distillation']:
+                if self.args.mode in ['melhubert', 'melhubert_embedding_distiller', 'distillation']:
                     # Save model for every x epochs in MelHuBERT pre-training mode
-                    if (global_step % int(self.save_every_x_epochs * step_per_epoch) == 0) and first_accu:
+                    save_steps = self.base_tools.save_every_x_epochs * step_per_epoch if self.base_tools.save_every_x_epochs else self.base_tools.save_steps
+                    if (global_step % save_steps == 0) and first_accu:
                         num_epoch = global_step // step_per_epoch
-                        self.mh_tools.save_model(optimizer, global_step, num_epoch)
+                        self.base_tools.save_model(optimizer, global_step, num_epoch, scheduler=scheduler)
                 elif self.args.mode == 'weight-pruning':
                     if (global_step in self.prune_steps) and first_accu:
                         # Weight pruning
@@ -412,9 +417,10 @@ class Runner():
                     self.wp_tools.update_target_smooth_loss(global_step)
                     batch_loss = 0        
 
-                for p in self.upstream_pretrainer.model.parameters():
-                    if p.grad is not None:
-                        p.grad = torch.div(p.grad, all_sample_size)
+                if(self.args.upstream == 'hubert' or self.args.upstream == 'wav2vec2'):
+                    for p in self.upstream_pretrainer.model.parameters():
+                        if p.grad is not None:
+                            p.grad = torch.div(p.grad, all_sample_size)
 
                 # Gradient clipping
                 grad_norm = torch.nn.utils.clip_grad_norm_(self.upstream_pretrainer.model.parameters(), self.runner_config['runner'].get('gradient_clipping', 0)).detach()
@@ -457,9 +463,9 @@ class Runner():
                         self.logger.add_scalar(f'{prefix}loss_scale', scaler.get_scale(), global_step=global_step)
                 # Save model at the last step
                 if pbar.n == pbar.total-1:
-                    if self.args.mode in ['melhubert', 'distillation']:
+                    if self.args.mode in ['melhubert', 'melhubert_embedding_distiller', 'distillation']:
                         name = 'last-step.ckpt'
-                        self.mh_tools.save_model(optimizer, global_step, num_epoch, name=name)
+                        self.base_tools.save_model(optimizer, global_step, num_epoch, name=name)
                     elif self.args.mode == 'weight-pruning':
                         name = 'last-step.ckpt'
                         self.wp_tools._save(optimizer, pbar.n, pbar.total, filename=name)

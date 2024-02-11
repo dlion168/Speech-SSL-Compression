@@ -9,10 +9,10 @@ import torch
 from typing import Dict, List, Optional, Tuple
 from fairseq.data import Dictionary
 from torch import nn
-from module import TransformerEncoder, Wav2vec2TransformerEncoder, GradMultiply, ConvFeatureExtractionModel
+from module import TransformerEncoder, Wav2vec2TransformerEncoder, GradMultiply, ConvFeatureExtractionModel, SplitLinear
 from fairseq_code import compute_mask_indices, buffered_arange, index_put, is_xla_tensor
 from fairseq_code.gumbel_vector_quantizer import GumbelVectorQuantizer
-from model_config import Wav2Vec2Config, HuBERTConfig, MelHuBERTConfig
+from model_config import Wav2Vec2Config, HuBERTConfig, MelHuBERTConfig, MelHuBERTDistillerConfig
 
 class MelHuBERTModel(nn.Module):
 
@@ -138,7 +138,7 @@ class MelHuBERTModel(nn.Module):
             )
         else:
             hidden = self.encoder(x)
-        
+        # print(f"layer_hiddens = {len(layer_hiddens)} x {len(layer_hiddens[0].shape)} ")
         if no_pred:
             return hidden, None, None, None, None, layer_hiddens, pre_feat
 
@@ -893,6 +893,7 @@ class Wav2Vec2Model(nn.Module):
             "x": x,
             "padding_mask": padding_mask,
             "features_pen": features_pen,
+            "mask_indices": mask_indices
         }
 
         if prob_ppl is not None:
@@ -956,3 +957,173 @@ class Wav2Vec2Model(nn.Module):
             self.encoder.layers = nn.ModuleList(
                 l for i, l in enumerate(self.encoder.layers) if i <= last_layer
             )
+
+class MelHuBERTDistillerModel(nn.Module):
+    """
+    Distiller Model
+    """
+
+    def __init__(self, config: MelHuBERTDistillerConfig):
+        super().__init__()
+
+        self.model_config = config
+        
+        self.pre_extract_proj = (
+            nn.Linear(config.feat_emb_dim,  config.encoder_embed_dim)
+            if config.feat_emb_dim != config.encoder_embed_dim
+            else None
+        )
+        
+        self.n_tasks = config.n_tasks
+        self.task_emb_type = config.task_emb_type
+
+        final_emb_size = config.encoder_embed_dim
+        if self.task_emb_type == "add":
+            self.task_embedding = nn.Embedding(config.n_tasks, config.encoder_embed_dim)
+            nn.init.normal_(self.task_embedding.weight, 0.0, 0.1)
+        elif self.task_emb_type == "concat":
+            assert config.task_emb_size > 0
+            feat_emb_dim += config.task_emb_size
+            self.task_embedding = nn.Embedding(config.n_tasks, config.task_emb_size)
+        elif self.task_emb_type == "concat-last":
+            assert config.task_emb_size > 0
+            self.task_embedding = nn.Embedding(config.n_tasks, config.task_emb_size)
+            final_emb_size += config.task_emb_size
+        elif self.task_emb_type == "expand-last":
+            self.pred_layer_id = config.pred_layer_id
+            assert self.n_tasks == len(self.pred_layer_id)
+            print(
+                f"[DistillerModel] - Expands the output dimension by {self.n_tasks} times"
+            )
+            print(f"[DistillerModel] - Pred layers: {self.pred_layer_id}")
+        elif self.task_emb_type == "self-hidden":
+            self.pred_layer_id = config.pred_layer_id
+            assert self.n_tasks == len(self.pred_layer_id)
+            assert self.n_tasks == config.encoder_layers + 1
+            print("[DistillerModel] - Predicting with self-hidden layers")
+            print(f"[DistillerModel] - Pred layers: {self.pred_layer_id}")
+        elif self.task_emb_type == "none":
+            print(
+                f"[DistillerModel] - Disabled task embedding (predicts only layer {self.n_tasks})"
+            )
+        else:
+            raise NotImplementedError(f"Unknown task emb type {self.task_emb_type}")
+
+        if config.encoder_layers > 0:
+            self.encoder = TransformerEncoder(config)
+        else:
+            self.encoder = nn.GELU()
+
+        final_dim = config.final_dim * (
+            1 if self.task_emb_type != "expand-last" else self.n_tasks
+        )
+
+        inter_dim = config.out_layer_inter_dim
+        inter_dim = inter_dim if inter_dim > 0 else final_emb_size
+
+        print(f"[DistillerModel] - Out layer type: {config.out_layer_type}")
+        if config.out_layer_type == "expand-last":
+            assert self.task_emb_type == "expand-last"
+            print(f"[DistillerModel] - Inter dim = {inter_dim}")
+            self.output_layer = nn.Sequential(
+                nn.Linear(final_emb_size, inter_dim * self.n_tasks),
+                nn.GELU(),
+                SplitLinear(inter_dim, self.n_tasks, config.final_dim),
+            )
+        elif config.out_layer_type in {"none", "self-hidden"}:
+            self.output_layer = None
+        else:
+            raise NotImplementedError(f"Unknown out layer type {config.out_layer_type}")
+    
+    def forward_feature(self, feat, pad_mask):
+        """Forward feature extractor"""  
+        # Masking before projection 
+        pre_feat = feat
+        if self.pre_extract_proj != None:
+            pre_feat = self.pre_extract_proj(feat)
+        
+        # Masking after projection 
+        x = pre_feat
+        return x, pad_mask
+
+    def forward(self, feat, pad_mask, cluster_label=None, task_id=None, get_hidden=True, no_pred=False):
+        """
+        Forward function
+        Input:
+            wave (FloatTensor): B x T_wave
+            pad_mask (BoolTensor): B x T_wave
+            task_id (LongTensor): N >= 1
+        """ 
+
+        feat, pad_mask = self.forward_feature(feat, pad_mask)
+
+        if self.task_emb_type not in ["none", "expand-last", "self-hidden"]:
+            if task_id is None:
+                task_id = self.generate_task_id(feat.device)
+            elif isinstance(task_id, list):
+                task_id = torch.LongTensor(task_id).to(feat.device)
+            task_embs = self.task_embedding(task_id)
+            # N x D
+            n_sz = len(task_id)
+        else:
+            n_sz = 1
+        b_sz, t_sz, _ = feat.shape
+
+        if self.task_emb_type == "add":
+            # Add embs to feature
+            feat_final = feat
+            feat_final = feat_final.unsqueeze(1) + task_embs.unsqueeze(0).unsqueeze(2)
+        elif self.task_emb_type == "concat":
+            # Concatenates embs to feature
+            feat_final = torch.cat(
+                [
+                    feat.unsqueeze(1).expand(-1, n_sz, -1, -1),
+                    task_embs.unsqueeze(0).unsqueeze(2).expand(b_sz, -1, t_sz, -1),
+                ],
+                dim=-1,
+            )
+        else:
+            feat_final = feat
+            feat_final = feat_final.unsqueeze(1)
+        # feat_final: B x N x T x D or B x 1 x T x D
+
+        pad_mask = pad_mask.unsqueeze(1).expand(-1, n_sz, -1).reshape(b_sz * n_sz, t_sz)
+        # BN x T
+        feat_final = feat_final.reshape(b_sz * n_sz, t_sz, -1)
+        # BN x T x D
+
+        layer_hiddens = []
+        if self.model_config.encoder_layers > 0:
+            get_hidden_tmp = (
+                True if (self.task_emb_type == "self-hidden") else get_hidden
+            )
+            hidden, layer_hiddens = self.encoder(
+                feat_final, ~pad_mask.bool(), get_hidden=get_hidden_tmp
+            )
+        else:
+            hidden = self.encoder(feat_final)
+        if not no_pred:
+            if self.task_emb_type == "self-hidden":
+                pred = torch.stack([feat_final] + layer_hiddens, dim=1)
+            else:
+                pred = self.output_layer(hidden).reshape(b_sz, n_sz, t_sz, -1)
+            # B x N x T x D
+        else:
+            pred = None
+
+        if (not no_pred) and self.task_emb_type == "expand-last":
+            assert n_sz == 1, n_sz
+            pred = (
+                pred.squeeze(1)
+                .reshape(b_sz, t_sz, self.n_tasks, -1)
+                .permute(0, 2, 1, 3)
+            )
+            # B x N x T x D
+
+        if get_hidden:
+            return feat, feat_final, pred, pad_mask, layer_hiddens
+        else:
+            return feat, feat_final, pred, pad_mask
+
+    def generate_task_id(self, device):
+        return torch.arange(self.n_tasks, device=device, dtype=torch.long)

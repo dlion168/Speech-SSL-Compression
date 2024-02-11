@@ -657,3 +657,40 @@ class Wav2Vec2TransformerSentenceEncoderLayer(nn.Module):
             x = self.final_layer_norm(x)
 
         return x, (attn, layer_result)
+
+class SplitLinear(nn.Module):
+    """Split Linear Layer"""
+
+    def __init__(self, in_dim, in_split, out_dim):
+        super().__init__()
+
+        self.in_dim = in_dim  # Din
+        self.in_split = in_split  # N
+        self.out_dim = out_dim  # Dout
+
+        if in_split > 1:
+            # weight = torch.zeros((1, 1, self.in_split, self.in_dim, self.out_dim))
+            weight = torch.zeros((self.in_split, self.in_dim, self.out_dim))
+            self.weight = nn.Parameter(weight, requires_grad=True)
+            nn.init.uniform_(self.weight, -(self.in_dim**-0.5), self.in_dim**-0.5)
+
+            bias = torch.zeros((1, 1, self.in_split, self.out_dim))
+            self.bias = nn.Parameter(bias, requires_grad=True)
+            nn.init.uniform_(self.bias, -(self.in_dim**-0.5), self.in_dim**-0.5)
+        else:
+            self.layer = nn.Linear(self.in_dim, self.out_dim)
+
+    def forward(self, x: torch.Tensor):
+        # x: shape = B x T x NDin
+
+        if self.in_split == 1:
+            return self.layer(x)
+        else:
+            x = x.reshape(x.shape[0], x.shape[1], self.in_split, 1, self.in_dim)
+            # x: B x T x N x 1 x Din
+
+            out = torch.einsum("...klm,kmn->...kln", x, self.weight).squeeze(3)
+            # out: B x T x N x Dout
+            out = out + self.bias
+
+            return out.reshape(x.shape[0], x.shape[1], -1)
