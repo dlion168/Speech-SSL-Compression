@@ -73,7 +73,7 @@ class Wav2vec2Pretrainer(nn.Module):
                     layer.fc2 = nn.Linear(ffn_embed_dim, embed_dim, bias=bias)
                     layer.fc1.reset_parameters()
                     layer.fc2.reset_parameters()
-                
+                self.model.encoder.ffn_embedding_dim = ffn_embed_dim
             # Initialize the pruning mask if needed 
             # (Do not support executing other compression methods on a weight pruned checkpoint)
             if 'Pruning' in all_states:
