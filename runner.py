@@ -113,9 +113,9 @@ class Runner():
             print('We do not support this mode currently.')
 
     def _get_upstream(self):
-        # init_upstream = self.init_ckpt.get('Upstream_Config')
-        # if init_upstream:
-        #     self.upstream_config = init_upstream
+        init_upstream = self.init_ckpt.get('Upstream_Config')
+        if init_upstream:
+            self.upstream_config = init_upstream
         
         module_path = f'upstream.{self.args.upstream}'
         Upstream = getattr(importlib.import_module(module_path), 'UpstreamPretrainExpert')
