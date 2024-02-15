@@ -56,6 +56,8 @@ def main():
         args = update_args(args, ckpt['Args'], exceptions=['initial_weight'])
         os.makedirs(args.expdir, exist_ok=True)
         runner_config = ckpt['Runner']
+        # with open(args.runner_config, 'r') as file:
+        #     runner_config = yaml.load(file, Loader=yaml.FullLoader)
     
     else:
         print(f'[Runner] - Start a new experiment')

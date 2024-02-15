@@ -43,7 +43,7 @@ class Wav2vec2Pretrainer(nn.Module):
         if self.initial_weight:
             all_states = torch.load(self.initial_weight, map_location="cpu")
             print(f"loading model {all_states.keys()}")
-            # If the attention heads have been pruned 
+            # If the attention heads have been pruned
             if 'Pruned_heads' in all_states:
                 self.pruned_heads = all_states["Pruned_heads"]
                 summarized = {}
@@ -65,7 +65,15 @@ class Wav2vec2Pretrainer(nn.Module):
                         layer.self_attn.out_proj = nn.Linear(embed_dim, orig_embed_dim, bias=bias)
                         layer.self_attn.skip_embed_dim_check = True
                         layer.self_attn.reset_parameters()
-            
+            elif all_states['Args'].mode == 'row-pruning':
+                for idx, layer in enumerate(self.model.encoder.layers):
+                    ffn_embed_dim, embed_dim = all_states["model"][f"encoder.layers.{idx}.fc1.weight"].shape
+                    bias = True
+                    layer.fc1 = nn.Linear(embed_dim, ffn_embed_dim, bias=bias)
+                    layer.fc2 = nn.Linear(ffn_embed_dim, embed_dim, bias=bias)
+                    layer.fc1.reset_parameters()
+                    layer.fc2.reset_parameters()
+                
             # Initialize the pruning mask if needed 
             # (Do not support executing other compression methods on a weight pruned checkpoint)
             if 'Pruning' in all_states:

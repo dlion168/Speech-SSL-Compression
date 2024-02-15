@@ -210,7 +210,7 @@ class Runner():
         return self.runner_config['task']['data'] if self.runner_config['task']['label_dir'] is None else self.runner_config['task']['label_dir']
 
     def _get_dataloader(self,):
-        if self.args.upstream == 'melhubert' or 'melhubert_embedding_distiller':
+        if self.args.upstream == 'melhubert' or self.args.upstream == 'melhubert_embedding_distiller':
             dataset = MelFeatDataset(
                 self.args.frame_period,
                 self.upstream_config['task'],
